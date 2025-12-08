@@ -24,6 +24,9 @@ class Task {
 
   String? category;
 
+  // Task description/notes
+  String? description;
+
   // Completion details (optional)
   String? completionNote;
   String? completionPhotoPath;
@@ -45,6 +48,7 @@ class Task {
     bool? isFixed,
     bool? isDraft,
     String? category,
+    String? description,
     String? completionNote,
     String? completionPhotoPath,
     DateTime? completedAt,
@@ -58,6 +62,7 @@ class Task {
       ..isFixed = isFixed ?? this.isFixed
       ..isDraft = isDraft ?? this.isDraft
       ..category = category ?? this.category
+      ..description = description ?? this.description
       ..completionNote = completionNote ?? this.completionNote
       ..completionPhotoPath = completionPhotoPath ?? this.completionPhotoPath
       ..completedAt = completedAt ?? this.completedAt;

@@ -37,38 +37,43 @@ const TaskSchema = CollectionSchema(
       name: r'completionPhotoPath',
       type: IsarType.string,
     ),
-    r'dueDate': PropertySchema(
+    r'description': PropertySchema(
       id: 4,
+      name: r'description',
+      type: IsarType.string,
+    ),
+    r'dueDate': PropertySchema(
+      id: 5,
       name: r'dueDate',
       type: IsarType.dateTime,
     ),
     r'durationMinutes': PropertySchema(
-      id: 5,
+      id: 6,
       name: r'durationMinutes',
       type: IsarType.long,
     ),
     r'endTime': PropertySchema(
-      id: 6,
+      id: 7,
       name: r'endTime',
       type: IsarType.dateTime,
     ),
     r'isCompleted': PropertySchema(
-      id: 7,
+      id: 8,
       name: r'isCompleted',
       type: IsarType.bool,
     ),
     r'isDraft': PropertySchema(
-      id: 8,
+      id: 9,
       name: r'isDraft',
       type: IsarType.bool,
     ),
     r'isFixed': PropertySchema(
-      id: 9,
+      id: 10,
       name: r'isFixed',
       type: IsarType.bool,
     ),
     r'title': PropertySchema(
-      id: 10,
+      id: 11,
       name: r'title',
       type: IsarType.string,
     )
@@ -111,6 +116,12 @@ int _taskEstimateSize(
       bytesCount += 3 + value.length * 3;
     }
   }
+  {
+    final value = object.description;
+    if (value != null) {
+      bytesCount += 3 + value.length * 3;
+    }
+  }
   bytesCount += 3 + object.title.length * 3;
   return bytesCount;
 }
@@ -125,13 +136,14 @@ void _taskSerialize(
   writer.writeDateTime(offsets[1], object.completedAt);
   writer.writeString(offsets[2], object.completionNote);
   writer.writeString(offsets[3], object.completionPhotoPath);
-  writer.writeDateTime(offsets[4], object.dueDate);
-  writer.writeLong(offsets[5], object.durationMinutes);
-  writer.writeDateTime(offsets[6], object.endTime);
-  writer.writeBool(offsets[7], object.isCompleted);
-  writer.writeBool(offsets[8], object.isDraft);
-  writer.writeBool(offsets[9], object.isFixed);
-  writer.writeString(offsets[10], object.title);
+  writer.writeString(offsets[4], object.description);
+  writer.writeDateTime(offsets[5], object.dueDate);
+  writer.writeLong(offsets[6], object.durationMinutes);
+  writer.writeDateTime(offsets[7], object.endTime);
+  writer.writeBool(offsets[8], object.isCompleted);
+  writer.writeBool(offsets[9], object.isDraft);
+  writer.writeBool(offsets[10], object.isFixed);
+  writer.writeString(offsets[11], object.title);
 }
 
 Task _taskDeserialize(
@@ -145,13 +157,14 @@ Task _taskDeserialize(
   object.completedAt = reader.readDateTimeOrNull(offsets[1]);
   object.completionNote = reader.readStringOrNull(offsets[2]);
   object.completionPhotoPath = reader.readStringOrNull(offsets[3]);
-  object.dueDate = reader.readDateTimeOrNull(offsets[4]);
-  object.durationMinutes = reader.readLong(offsets[5]);
+  object.description = reader.readStringOrNull(offsets[4]);
+  object.dueDate = reader.readDateTimeOrNull(offsets[5]);
+  object.durationMinutes = reader.readLong(offsets[6]);
   object.id = id;
-  object.isCompleted = reader.readBool(offsets[7]);
-  object.isDraft = reader.readBool(offsets[8]);
-  object.isFixed = reader.readBool(offsets[9]);
-  object.title = reader.readString(offsets[10]);
+  object.isCompleted = reader.readBool(offsets[8]);
+  object.isDraft = reader.readBool(offsets[9]);
+  object.isFixed = reader.readBool(offsets[10]);
+  object.title = reader.readString(offsets[11]);
   return object;
 }
 
@@ -171,18 +184,20 @@ P _taskDeserializeProp<P>(
     case 3:
       return (reader.readStringOrNull(offset)) as P;
     case 4:
-      return (reader.readDateTimeOrNull(offset)) as P;
+      return (reader.readStringOrNull(offset)) as P;
     case 5:
-      return (reader.readLong(offset)) as P;
-    case 6:
       return (reader.readDateTimeOrNull(offset)) as P;
+    case 6:
+      return (reader.readLong(offset)) as P;
     case 7:
-      return (reader.readBool(offset)) as P;
+      return (reader.readDateTimeOrNull(offset)) as P;
     case 8:
       return (reader.readBool(offset)) as P;
     case 9:
       return (reader.readBool(offset)) as P;
     case 10:
+      return (reader.readBool(offset)) as P;
+    case 11:
       return (reader.readString(offset)) as P;
     default:
       throw IsarError('Unknown property with id $propertyId');
@@ -786,6 +801,152 @@ extension TaskQueryFilter on QueryBuilder<Task, Task, QFilterCondition> {
     });
   }
 
+  QueryBuilder<Task, Task, QAfterFilterCondition> descriptionIsNull() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(const FilterCondition.isNull(
+        property: r'description',
+      ));
+    });
+  }
+
+  QueryBuilder<Task, Task, QAfterFilterCondition> descriptionIsNotNull() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(const FilterCondition.isNotNull(
+        property: r'description',
+      ));
+    });
+  }
+
+  QueryBuilder<Task, Task, QAfterFilterCondition> descriptionEqualTo(
+    String? value, {
+    bool caseSensitive = true,
+  }) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(FilterCondition.equalTo(
+        property: r'description',
+        value: value,
+        caseSensitive: caseSensitive,
+      ));
+    });
+  }
+
+  QueryBuilder<Task, Task, QAfterFilterCondition> descriptionGreaterThan(
+    String? value, {
+    bool include = false,
+    bool caseSensitive = true,
+  }) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(FilterCondition.greaterThan(
+        include: include,
+        property: r'description',
+        value: value,
+        caseSensitive: caseSensitive,
+      ));
+    });
+  }
+
+  QueryBuilder<Task, Task, QAfterFilterCondition> descriptionLessThan(
+    String? value, {
+    bool include = false,
+    bool caseSensitive = true,
+  }) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(FilterCondition.lessThan(
+        include: include,
+        property: r'description',
+        value: value,
+        caseSensitive: caseSensitive,
+      ));
+    });
+  }
+
+  QueryBuilder<Task, Task, QAfterFilterCondition> descriptionBetween(
+    String? lower,
+    String? upper, {
+    bool includeLower = true,
+    bool includeUpper = true,
+    bool caseSensitive = true,
+  }) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(FilterCondition.between(
+        property: r'description',
+        lower: lower,
+        includeLower: includeLower,
+        upper: upper,
+        includeUpper: includeUpper,
+        caseSensitive: caseSensitive,
+      ));
+    });
+  }
+
+  QueryBuilder<Task, Task, QAfterFilterCondition> descriptionStartsWith(
+    String value, {
+    bool caseSensitive = true,
+  }) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(FilterCondition.startsWith(
+        property: r'description',
+        value: value,
+        caseSensitive: caseSensitive,
+      ));
+    });
+  }
+
+  QueryBuilder<Task, Task, QAfterFilterCondition> descriptionEndsWith(
+    String value, {
+    bool caseSensitive = true,
+  }) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(FilterCondition.endsWith(
+        property: r'description',
+        value: value,
+        caseSensitive: caseSensitive,
+      ));
+    });
+  }
+
+  QueryBuilder<Task, Task, QAfterFilterCondition> descriptionContains(
+      String value,
+      {bool caseSensitive = true}) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(FilterCondition.contains(
+        property: r'description',
+        value: value,
+        caseSensitive: caseSensitive,
+      ));
+    });
+  }
+
+  QueryBuilder<Task, Task, QAfterFilterCondition> descriptionMatches(
+      String pattern,
+      {bool caseSensitive = true}) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(FilterCondition.matches(
+        property: r'description',
+        wildcard: pattern,
+        caseSensitive: caseSensitive,
+      ));
+    });
+  }
+
+  QueryBuilder<Task, Task, QAfterFilterCondition> descriptionIsEmpty() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(FilterCondition.equalTo(
+        property: r'description',
+        value: '',
+      ));
+    });
+  }
+
+  QueryBuilder<Task, Task, QAfterFilterCondition> descriptionIsNotEmpty() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(FilterCondition.greaterThan(
+        property: r'description',
+        value: '',
+      ));
+    });
+  }
+
   QueryBuilder<Task, Task, QAfterFilterCondition> dueDateIsNull() {
     return QueryBuilder.apply(this, (query) {
       return query.addFilterCondition(const FilterCondition.isNull(
@@ -1239,6 +1400,18 @@ extension TaskQuerySortBy on QueryBuilder<Task, Task, QSortBy> {
     });
   }
 
+  QueryBuilder<Task, Task, QAfterSortBy> sortByDescription() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addSortBy(r'description', Sort.asc);
+    });
+  }
+
+  QueryBuilder<Task, Task, QAfterSortBy> sortByDescriptionDesc() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addSortBy(r'description', Sort.desc);
+    });
+  }
+
   QueryBuilder<Task, Task, QAfterSortBy> sortByDueDate() {
     return QueryBuilder.apply(this, (query) {
       return query.addSortBy(r'dueDate', Sort.asc);
@@ -1373,6 +1546,18 @@ extension TaskQuerySortThenBy on QueryBuilder<Task, Task, QSortThenBy> {
     });
   }
 
+  QueryBuilder<Task, Task, QAfterSortBy> thenByDescription() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addSortBy(r'description', Sort.asc);
+    });
+  }
+
+  QueryBuilder<Task, Task, QAfterSortBy> thenByDescriptionDesc() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addSortBy(r'description', Sort.desc);
+    });
+  }
+
   QueryBuilder<Task, Task, QAfterSortBy> thenByDueDate() {
     return QueryBuilder.apply(this, (query) {
       return query.addSortBy(r'dueDate', Sort.asc);
@@ -1500,6 +1685,13 @@ extension TaskQueryWhereDistinct on QueryBuilder<Task, Task, QDistinct> {
     });
   }
 
+  QueryBuilder<Task, Task, QDistinct> distinctByDescription(
+      {bool caseSensitive = true}) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addDistinctBy(r'description', caseSensitive: caseSensitive);
+    });
+  }
+
   QueryBuilder<Task, Task, QDistinct> distinctByDueDate() {
     return QueryBuilder.apply(this, (query) {
       return query.addDistinctBy(r'dueDate');
@@ -1572,6 +1764,12 @@ extension TaskQueryProperty on QueryBuilder<Task, Task, QQueryProperty> {
   QueryBuilder<Task, String?, QQueryOperations> completionPhotoPathProperty() {
     return QueryBuilder.apply(this, (query) {
       return query.addPropertyName(r'completionPhotoPath');
+    });
+  }
+
+  QueryBuilder<Task, String?, QQueryOperations> descriptionProperty() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addPropertyName(r'description');
     });
   }
 

@@ -5,7 +5,6 @@ import 'package:remindlyf/domain/providers/task_provider.dart';
 import 'package:remindlyf/core/services/scheduling_service.dart';
 import 'package:gap/gap.dart';
 import 'package:intl/intl.dart';
-import 'package:flutter_animate/flutter_animate.dart';
 
 class TaskDetailSheet extends ConsumerStatefulWidget {
   final Task task;
@@ -25,8 +24,13 @@ class TaskDetailSheet extends ConsumerStatefulWidget {
 
 class _TaskDetailSheetState extends ConsumerState<TaskDetailSheet> {
   late TextEditingController _titleController;
+  late TextEditingController _descriptionController;
   late double _currentDuration;
   late int _maxIncrease;
+  bool _isEditingTitle = false;
+  bool _isEditingDescription = false;
+  bool _isEditingDuration = false;
+
   final int _minDuration = 5;
   final int _maxDuration = 180;
 
@@ -34,6 +38,9 @@ class _TaskDetailSheetState extends ConsumerState<TaskDetailSheet> {
   void initState() {
     super.initState();
     _titleController = TextEditingController(text: widget.task.title);
+    _descriptionController = TextEditingController(
+      text: widget.task.description ?? '',
+    );
     _currentDuration = widget.task.durationMinutes.toDouble();
     _maxIncrease = SchedulingService.getMaxPossibleIncrease(
       widget.task,
@@ -45,301 +52,744 @@ class _TaskDetailSheetState extends ConsumerState<TaskDetailSheet> {
   @override
   void dispose() {
     _titleController.dispose();
+    _descriptionController.dispose();
     super.dispose();
+  }
+
+  void _dismissKeyboard() {
+    FocusScope.of(context).unfocus();
   }
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final colorScheme = theme.colorScheme;
+    final isCompleted = widget.task.isCompleted;
     final maxAllowedDuration = (widget.task.durationMinutes + _maxIncrease)
         .clamp(_minDuration, _maxDuration);
 
-    return Container(
-      decoration: BoxDecoration(
-        color: colorScheme.surface,
-        borderRadius: const BorderRadius.vertical(top: Radius.circular(28)),
-      ),
-      child: SingleChildScrollView(
-        padding: EdgeInsets.only(
-          bottom: MediaQuery.of(context).viewInsets.bottom + 24,
-          left: 24,
-          right: 24,
-          top: 16,
+    return GestureDetector(
+      onTap: _dismissKeyboard,
+      child: Container(
+        decoration: BoxDecoration(
+          color: colorScheme.surface,
+          borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
         ),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            // Handle bar
-            Center(
-              child: Container(
-                width: 40,
-                height: 4,
-                decoration: BoxDecoration(
-                  color: colorScheme.outlineVariant,
-                  borderRadius: BorderRadius.circular(2),
-                ),
-              ),
-            ),
-            const Gap(16),
-
-            // Header with delete button
-            Row(
-              children: [
-                Container(
-                  padding: const EdgeInsets.all(10),
-                  decoration: BoxDecoration(
-                    gradient: LinearGradient(
-                      colors: [colorScheme.primary, colorScheme.secondary],
-                    ),
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                  child: Icon(Icons.edit_note, color: colorScheme.onPrimary),
-                ),
-                const Gap(12),
-                Text(
-                  'Edit Task',
-                  style: theme.textTheme.headlineSmall?.copyWith(
-                    fontWeight: FontWeight.bold,
-                  ),
-                ),
-                const Spacer(),
-                IconButton(
-                  onPressed: _showDeleteConfirmation,
-                  icon: Container(
-                    padding: const EdgeInsets.all(8),
+        child: SingleChildScrollView(
+          padding: EdgeInsets.only(
+            bottom: MediaQuery.of(context).viewInsets.bottom + 20,
+            left: 20,
+            right: 20,
+            top: 12,
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              // Drag handle - easy to close
+              Center(
+                child: GestureDetector(
+                  onTap: () => Navigator.pop(context),
+                  child: Container(
+                    width: 48,
+                    height: 5,
                     decoration: BoxDecoration(
-                      color: Colors.red.withAlpha(20),
-                      borderRadius: BorderRadius.circular(10),
+                      color: colorScheme.outlineVariant,
+                      borderRadius: BorderRadius.circular(3),
                     ),
-                    child: const Icon(Icons.delete_outline, color: Colors.red),
                   ),
                 ),
-              ],
-            ).animate().fadeIn().slideY(begin: -0.1),
-            const Gap(24),
-
-            // Task time info
-            Container(
-              padding: const EdgeInsets.all(14),
-              decoration: BoxDecoration(
-                color: colorScheme.primaryContainer.withAlpha(30),
-                borderRadius: BorderRadius.circular(14),
-                border: Border.all(color: colorScheme.primary.withAlpha(50)),
               ),
-              child: Row(
+              const Gap(16),
+
+              // Title row with edit button
+              Row(
                 children: [
-                  Icon(Icons.access_time, size: 20, color: colorScheme.primary),
-                  const Gap(10),
-                  Text(
-                    '${DateFormat.jm().format(widget.task.dueDate!)} - ${DateFormat.jm().format(widget.task.endTime!)}',
-                    style: theme.textTheme.titleSmall?.copyWith(
-                      color: colorScheme.primary,
-                      fontWeight: FontWeight.w600,
+                  Expanded(
+                    child: _isEditingTitle
+                        ? TextField(
+                            controller: _titleController,
+                            autofocus: true,
+                            style: theme.textTheme.titleLarge?.copyWith(
+                              fontWeight: FontWeight.bold,
+                            ),
+                            decoration: InputDecoration(
+                              hintText: 'Task title',
+                              border: OutlineInputBorder(
+                                borderRadius: BorderRadius.circular(12),
+                              ),
+                              contentPadding: const EdgeInsets.symmetric(
+                                horizontal: 14,
+                                vertical: 12,
+                              ),
+                            ),
+                            textCapitalization: TextCapitalization.sentences,
+                            onSubmitted: (_) => _saveTitle(),
+                          )
+                        : Text(
+                            widget.task.title,
+                            style: theme.textTheme.titleLarge?.copyWith(
+                              fontWeight: FontWeight.bold,
+                              decoration: isCompleted
+                                  ? TextDecoration.lineThrough
+                                  : null,
+                              color: isCompleted ? colorScheme.outline : null,
+                            ),
+                          ),
+                  ),
+                  const Gap(8),
+                  // Edit title button
+                  IconButton(
+                    onPressed: () {
+                      if (_isEditingTitle) {
+                        _saveTitle();
+                      } else {
+                        setState(() => _isEditingTitle = true);
+                      }
+                    },
+                    icon: Container(
+                      padding: const EdgeInsets.all(8),
+                      decoration: BoxDecoration(
+                        color: _isEditingTitle
+                            ? Colors.green.withAlpha(20)
+                            : colorScheme.primaryContainer.withAlpha(100),
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                      child: Icon(
+                        _isEditingTitle ? Icons.check : Icons.edit,
+                        size: 18,
+                        color: _isEditingTitle
+                            ? Colors.green
+                            : colorScheme.primary,
+                      ),
                     ),
                   ),
-                  const Spacer(),
-                  if (widget.task.isFixed)
-                    Container(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 8,
-                        vertical: 4,
-                      ),
+                  // Delete button
+                  IconButton(
+                    onPressed: _showDeleteConfirmation,
+                    icon: Container(
+                      padding: const EdgeInsets.all(8),
                       decoration: BoxDecoration(
-                        color: Colors.orange.withAlpha(20),
-                        borderRadius: BorderRadius.circular(6),
+                        color: Colors.red.withAlpha(20),
+                        borderRadius: BorderRadius.circular(10),
                       ),
-                      child: const Row(
+                      child: const Icon(
+                        Icons.delete_outline,
+                        size: 18,
+                        color: Colors.red,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+              const Gap(14),
+
+              // Description section - hidden by default, only show if has description or editing
+              if (_isEditingDescription)
+                Container(
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: colorScheme.surfaceContainerHighest.withAlpha(40),
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(
+                      color: colorScheme.outlineVariant.withAlpha(50),
+                    ),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
                         children: [
-                          Icon(Icons.lock, size: 12, color: Colors.orange),
-                          Gap(4),
+                          Icon(
+                            Icons.notes,
+                            size: 18,
+                            color: colorScheme.outline,
+                          ),
+                          const Gap(8),
                           Text(
-                            'Fixed',
-                            style: TextStyle(
-                              fontSize: 11,
-                              color: Colors.orange,
+                            'Note',
+                            style: theme.textTheme.labelMedium?.copyWith(
+                              color: colorScheme.outline,
                               fontWeight: FontWeight.w600,
                             ),
                           ),
                         ],
                       ),
-                    ),
-                ],
-              ),
-            ).animate().fadeIn(delay: 50.ms),
-            const Gap(20),
-
-            // Title field
-            TextFormField(
-              controller: _titleController,
-              decoration: InputDecoration(
-                labelText: 'Task Title',
-                prefixIcon: const Icon(Icons.title),
-                border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(14),
-                ),
-                filled: true,
-                fillColor: colorScheme.surfaceContainerHighest.withAlpha(50),
-              ),
-              textCapitalization: TextCapitalization.sentences,
-            ).animate().fadeIn(delay: 100.ms),
-            const Gap(24),
-
-            // Duration slider
-            Text(
-              'Duration',
-              style: theme.textTheme.titleMedium?.copyWith(
-                fontWeight: FontWeight.bold,
-              ),
-            ),
-            const Gap(8),
-            Container(
-              padding: const EdgeInsets.all(20),
-              decoration: BoxDecoration(
-                gradient: LinearGradient(
-                  colors: [
-                    colorScheme.primaryContainer.withAlpha(50),
-                    colorScheme.secondaryContainer.withAlpha(30),
-                  ],
-                ),
-                borderRadius: BorderRadius.circular(20),
-                border: Border.all(color: colorScheme.primary.withAlpha(50)),
-              ),
-              child: Column(
-                children: [
-                  // Duration display
-                  Text(
-                    _formatMinutes(_currentDuration.round()),
-                    style: theme.textTheme.displaySmall?.copyWith(
-                      fontWeight: FontWeight.bold,
-                      color: colorScheme.primary,
-                    ),
-                  ),
-                  const Gap(8),
-                  Text(
-                    'Max available: ${_formatMinutes(maxAllowedDuration)}',
-                    style: theme.textTheme.bodySmall?.copyWith(
-                      color: colorScheme.outline,
-                    ),
-                  ),
-                  const Gap(16),
-                  // Slider
-                  SliderTheme(
-                    data: SliderTheme.of(context).copyWith(
-                      activeTrackColor: colorScheme.primary,
-                      inactiveTrackColor: colorScheme.surfaceContainerHighest,
-                      thumbColor: colorScheme.primary,
-                      overlayColor: colorScheme.primary.withAlpha(30),
-                      trackHeight: 8,
-                      thumbShape: const RoundSliderThumbShape(
-                        enabledThumbRadius: 12,
-                      ),
-                    ),
-                    child: Slider(
-                      value: _currentDuration.clamp(
-                        _minDuration.toDouble(),
-                        maxAllowedDuration.toDouble(),
-                      ),
-                      min: _minDuration.toDouble(),
-                      max: maxAllowedDuration.toDouble(),
-                      divisions: (maxAllowedDuration - _minDuration) ~/ 5,
-                      onChanged: (value) {
-                        setState(() {
-                          _currentDuration =
-                              (value / 5).round() *
-                              5.0; // Round to 5 min intervals
-                        });
-                      },
-                    ),
-                  ),
-                  // Quick buttons
-                  const Gap(12),
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                    children: [15, 30, 60, 90].map((mins) {
-                      final isAvailable = mins <= maxAllowedDuration;
-                      final isSelected = _currentDuration.round() == mins;
-                      return GestureDetector(
-                        onTap: isAvailable
-                            ? () => setState(
-                                () => _currentDuration = mins.toDouble(),
-                              )
-                            : null,
-                        child: Container(
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 14,
-                            vertical: 8,
+                      const Gap(10),
+                      TextField(
+                        controller: _descriptionController,
+                        autofocus: true,
+                        maxLines: 3,
+                        decoration: InputDecoration(
+                          hintText: 'Add notes about this task...',
+                          border: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(10),
                           ),
-                          decoration: BoxDecoration(
-                            color: isSelected
-                                ? colorScheme.primary
-                                : isAvailable
-                                ? colorScheme.surfaceContainerHighest
-                                : colorScheme.surfaceContainerHighest.withAlpha(
-                                    50,
-                                  ),
-                            borderRadius: BorderRadius.circular(8),
-                          ),
-                          child: Text(
-                            _formatMinutes(mins),
-                            style: TextStyle(
-                              color: isSelected
-                                  ? colorScheme.onPrimary
-                                  : isAvailable
-                                  ? colorScheme.onSurface
-                                  : colorScheme.outline,
-                              fontWeight: isSelected
-                                  ? FontWeight.bold
-                                  : FontWeight.normal,
-                              fontSize: 13,
+                          contentPadding: const EdgeInsets.all(12),
+                        ),
+                        textCapitalization: TextCapitalization.sentences,
+                      ),
+                      const Gap(12),
+                      Row(
+                        children: [
+                          Expanded(
+                            child: OutlinedButton(
+                              onPressed: () {
+                                _descriptionController.text =
+                                    widget.task.description ?? '';
+                                setState(() => _isEditingDescription = false);
+                              },
+                              child: const Text('Cancel'),
                             ),
                           ),
+                          const Gap(12),
+                          Expanded(
+                            child: FilledButton(
+                              onPressed: _saveDescription,
+                              child: const Text('Save Note'),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
+                )
+              else if (widget.task.description?.isNotEmpty == true)
+                // Show existing description
+                Container(
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: colorScheme.surfaceContainerHighest.withAlpha(40),
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Icon(Icons.notes, size: 16, color: colorScheme.outline),
+                      const Gap(10),
+                      Expanded(
+                        child: Text(
+                          widget.task.description!,
+                          style: theme.textTheme.bodyMedium,
                         ),
-                      );
-                    }).toList(),
+                      ),
+                      GestureDetector(
+                        onTap: () =>
+                            setState(() => _isEditingDescription = true),
+                        child: Icon(
+                          Icons.edit,
+                          size: 16,
+                          color: colorScheme.primary,
+                        ),
+                      ),
+                    ],
                   ),
-                ],
-              ),
-            ).animate().fadeIn(delay: 150.ms),
-            const Gap(28),
+                )
+              else
+                // Just show "Add note" link
+                GestureDetector(
+                  onTap: () => setState(() => _isEditingDescription = true),
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 4),
+                    child: Row(
+                      children: [
+                        Icon(Icons.add, size: 16, color: colorScheme.outline),
+                        const Gap(6),
+                        Text(
+                          'Add note',
+                          style: theme.textTheme.bodySmall?.copyWith(
+                            color: colorScheme.outline,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              const Gap(14),
 
-            // Action buttons
-            Row(
-              children: [
-                Expanded(
-                  child: OutlinedButton(
-                    onPressed: () => Navigator.pop(context),
-                    style: OutlinedButton.styleFrom(
-                      padding: const EdgeInsets.symmetric(vertical: 14),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(14),
-                      ),
+              // Mark as Complete/Incomplete button
+              GestureDetector(
+                onTap: _toggleCompletion,
+                child: Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 16,
+                    vertical: 14,
+                  ),
+                  decoration: BoxDecoration(
+                    gradient: LinearGradient(
+                      colors: isCompleted
+                          ? [Colors.orange.shade400, Colors.orange.shade600]
+                          : [Colors.green.shade400, Colors.green.shade600],
                     ),
-                    child: const Text('Cancel'),
+                    borderRadius: BorderRadius.circular(14),
+                    boxShadow: [
+                      BoxShadow(
+                        color: (isCompleted ? Colors.orange : Colors.green)
+                            .withAlpha(60),
+                        blurRadius: 8,
+                        offset: const Offset(0, 3),
+                      ),
+                    ],
+                  ),
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Icon(
+                        isCompleted ? Icons.replay : Icons.check_circle_outline,
+                        color: Colors.white,
+                        size: 22,
+                      ),
+                      const Gap(10),
+                      Text(
+                        isCompleted ? 'Mark as Incomplete' : 'Mark as Complete',
+                        style: theme.textTheme.titleMedium?.copyWith(
+                          color: Colors.white,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                    ],
                   ),
                 ),
-                const Gap(12),
-                Expanded(
-                  flex: 2,
-                  child: FilledButton.icon(
-                    onPressed: _saveChanges,
-                    icon: const Icon(Icons.check),
-                    label: const Text('Save Changes'),
-                    style: FilledButton.styleFrom(
-                      padding: const EdgeInsets.symmetric(vertical: 14),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(14),
-                      ),
-                    ),
+              ),
+              const Gap(14),
+
+              // Time info - Scheduled Time
+              Container(
+                padding: const EdgeInsets.all(14),
+                decoration: BoxDecoration(
+                  color: colorScheme.surfaceContainerHighest.withAlpha(40),
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(
+                    color: colorScheme.outlineVariant.withAlpha(50),
                   ),
                 ),
-              ],
-            ).animate().fadeIn(delay: 200.ms),
-          ],
+                child: Column(
+                  children: [
+                    // Scheduled Time
+                    Row(
+                      children: [
+                        Icon(
+                          Icons.schedule,
+                          size: 18,
+                          color: colorScheme.primary,
+                        ),
+                        const Gap(10),
+                        Text(
+                          'Scheduled Time',
+                          style: theme.textTheme.bodyMedium?.copyWith(
+                            color: colorScheme.outline,
+                          ),
+                        ),
+                        const Spacer(),
+                        Text(
+                          '${DateFormat.jm().format(widget.task.dueDate!)} - ${DateFormat.jm().format(widget.task.endTime!)}',
+                          style: theme.textTheme.bodyMedium?.copyWith(
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ],
+                    ),
+                    // Fixed badge
+                    if (widget.task.isFixed) ...[
+                      const Gap(10),
+                      Divider(
+                        height: 1,
+                        color: colorScheme.outlineVariant.withAlpha(50),
+                      ),
+                      const Gap(10),
+                      Row(
+                        children: [
+                          const Icon(
+                            Icons.lock,
+                            size: 18,
+                            color: Colors.orange,
+                          ),
+                          const Gap(10),
+                          Text(
+                            'Fixed Time',
+                            style: theme.textTheme.bodyMedium?.copyWith(
+                              color: colorScheme.outline,
+                            ),
+                          ),
+                          const Spacer(),
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 10,
+                              vertical: 4,
+                            ),
+                            decoration: BoxDecoration(
+                              color: Colors.orange.withAlpha(20),
+                              borderRadius: BorderRadius.circular(6),
+                            ),
+                            child: const Text(
+                              'Cannot be moved',
+                              style: TextStyle(
+                                fontSize: 12,
+                                color: Colors.orange,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ],
+                    // Completed at info
+                    if (isCompleted && widget.task.completedAt != null) ...[
+                      const Gap(10),
+                      Divider(
+                        height: 1,
+                        color: colorScheme.outlineVariant.withAlpha(50),
+                      ),
+                      const Gap(10),
+                      Row(
+                        children: [
+                          const Icon(
+                            Icons.check_circle,
+                            size: 18,
+                            color: Colors.green,
+                          ),
+                          const Gap(10),
+                          Text(
+                            'Completed at',
+                            style: theme.textTheme.bodyMedium?.copyWith(
+                              color: colorScheme.outline,
+                            ),
+                          ),
+                          const Spacer(),
+                          Text(
+                            DateFormat.jm().format(widget.task.completedAt!),
+                            style: theme.textTheme.bodyMedium?.copyWith(
+                              fontWeight: FontWeight.w600,
+                              color: Colors.green,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+              const Gap(14),
+
+              // Duration section - with edit capability (only for non-completed tasks)
+              Container(
+                padding: const EdgeInsets.all(14),
+                decoration: BoxDecoration(
+                  color: colorScheme.surfaceContainerHighest.withAlpha(40),
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(
+                    color: colorScheme.outlineVariant.withAlpha(50),
+                  ),
+                ),
+                child: Column(
+                  children: [
+                    Row(
+                      children: [
+                        Icon(
+                          isCompleted ? Icons.timer : Icons.timelapse,
+                          size: 18,
+                          color: isCompleted
+                              ? Colors.green
+                              : colorScheme.secondary,
+                        ),
+                        const Gap(10),
+                        Text(
+                          isCompleted ? 'Time Taken' : 'Duration',
+                          style: theme.textTheme.bodyMedium?.copyWith(
+                            color: colorScheme.outline,
+                          ),
+                        ),
+                        const Spacer(),
+                        if (!isCompleted && !_isEditingDuration)
+                          GestureDetector(
+                            onTap: () =>
+                                setState(() => _isEditingDuration = true),
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 10,
+                                vertical: 4,
+                              ),
+                              decoration: BoxDecoration(
+                                color: colorScheme.primary.withAlpha(20),
+                                borderRadius: BorderRadius.circular(6),
+                              ),
+                              child: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Icon(
+                                    Icons.edit,
+                                    size: 14,
+                                    color: colorScheme.primary,
+                                  ),
+                                  const Gap(4),
+                                  Text(
+                                    'Change',
+                                    style: TextStyle(
+                                      fontSize: 12,
+                                      color: colorScheme.primary,
+                                      fontWeight: FontWeight.w600,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          )
+                        else if (!_isEditingDuration)
+                          Text(
+                            _formatMinutes(widget.task.durationMinutes),
+                            style: theme.textTheme.bodyMedium?.copyWith(
+                              fontWeight: FontWeight.w600,
+                              color: isCompleted ? Colors.green : null,
+                            ),
+                          ),
+                      ],
+                    ),
+                    if (_isEditingDuration && !isCompleted) ...[
+                      const Gap(16),
+                      // Duration display
+                      Text(
+                        _formatMinutes(_currentDuration.round()),
+                        style: theme.textTheme.headlineMedium?.copyWith(
+                          fontWeight: FontWeight.bold,
+                          color: colorScheme.primary,
+                        ),
+                      ),
+                      const Gap(4),
+                      Text(
+                        'Max: ${_formatMinutes(maxAllowedDuration)}',
+                        style: theme.textTheme.bodySmall?.copyWith(
+                          color: colorScheme.outline,
+                        ),
+                      ),
+                      const Gap(12),
+                      // Slider
+                      SliderTheme(
+                        data: SliderTheme.of(context).copyWith(
+                          activeTrackColor: colorScheme.primary,
+                          inactiveTrackColor:
+                              colorScheme.surfaceContainerHighest,
+                          thumbColor: colorScheme.primary,
+                          overlayColor: colorScheme.primary.withAlpha(30),
+                          trackHeight: 6,
+                          thumbShape: const RoundSliderThumbShape(
+                            enabledThumbRadius: 10,
+                          ),
+                        ),
+                        child: Slider(
+                          value: _currentDuration.clamp(
+                            _minDuration.toDouble(),
+                            maxAllowedDuration.toDouble(),
+                          ),
+                          min: _minDuration.toDouble(),
+                          max: maxAllowedDuration.toDouble(),
+                          divisions: (maxAllowedDuration - _minDuration) ~/ 5,
+                          onChanged: (value) {
+                            setState(() {
+                              _currentDuration = (value / 5).round() * 5.0;
+                            });
+                          },
+                        ),
+                      ),
+                      // Quick buttons
+                      const Gap(8),
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                        children: [15, 30, 60, 90].map((mins) {
+                          final isAvailable = mins <= maxAllowedDuration;
+                          final isSelected = _currentDuration.round() == mins;
+                          return GestureDetector(
+                            onTap: isAvailable
+                                ? () => setState(
+                                    () => _currentDuration = mins.toDouble(),
+                                  )
+                                : null,
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 12,
+                                vertical: 6,
+                              ),
+                              decoration: BoxDecoration(
+                                color: isSelected
+                                    ? colorScheme.primary
+                                    : isAvailable
+                                    ? colorScheme.surfaceContainerHighest
+                                    : colorScheme.surfaceContainerHighest
+                                          .withAlpha(50),
+                                borderRadius: BorderRadius.circular(6),
+                              ),
+                              child: Text(
+                                _formatMinutes(mins),
+                                style: TextStyle(
+                                  color: isSelected
+                                      ? colorScheme.onPrimary
+                                      : isAvailable
+                                      ? colorScheme.onSurface
+                                      : colorScheme.outline,
+                                  fontWeight: isSelected
+                                      ? FontWeight.bold
+                                      : FontWeight.normal,
+                                  fontSize: 12,
+                                ),
+                              ),
+                            ),
+                          );
+                        }).toList(),
+                      ),
+                      const Gap(14),
+                      // Save/Cancel buttons for duration
+                      Row(
+                        children: [
+                          Expanded(
+                            child: OutlinedButton(
+                              onPressed: () {
+                                setState(() {
+                                  _currentDuration = widget.task.durationMinutes
+                                      .toDouble();
+                                  _isEditingDuration = false;
+                                });
+                              },
+                              child: const Text('Cancel'),
+                            ),
+                          ),
+                          const Gap(12),
+                          Expanded(
+                            child: FilledButton(
+                              onPressed: _saveDuration,
+                              child: const Text('Save Duration'),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ] else if (!isCompleted && !_isEditingDuration) ...[
+                      // Show current duration when not editing
+                      const Gap(8),
+                      Text(
+                        _formatMinutes(widget.task.durationMinutes),
+                        style: theme.textTheme.headlineSmall?.copyWith(
+                          fontWeight: FontWeight.bold,
+                          color: colorScheme.primary,
+                        ),
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+              const Gap(14),
+
+              // Close button
+              TextButton(
+                onPressed: () => Navigator.pop(context),
+                child: Text(
+                  'Close',
+                  style: TextStyle(
+                    color: colorScheme.outline,
+                    fontWeight: FontWeight.w500,
+                  ),
+                ),
+              ),
+            ],
+          ),
         ),
       ),
     );
+  }
+
+  void _saveTitle() async {
+    final newTitle = _titleController.text.trim();
+    if (newTitle.isEmpty) {
+      _showMessage('Please enter a title');
+      return;
+    }
+
+    final repository = ref.read(taskRepositoryProvider);
+    final updatedTask = widget.task.copyWith(title: newTitle);
+    await repository.updateTask(updatedTask);
+
+    setState(() => _isEditingTitle = false);
+    _showMessage('Title updated');
+  }
+
+  void _saveDescription() async {
+    final newDescription = _descriptionController.text.trim();
+    final repository = ref.read(taskRepositoryProvider);
+
+    // Update the task's description field directly
+    widget.task.description = newDescription.isEmpty ? null : newDescription;
+    await repository.updateTask(widget.task);
+
+    setState(() => _isEditingDescription = false);
+    _showMessage(newDescription.isEmpty ? 'Note removed' : 'Note saved');
+  }
+
+  void _saveDuration() async {
+    final repository = ref.read(taskRepositoryProvider);
+    final durationChange =
+        _currentDuration.round() - widget.task.durationMinutes;
+
+    if (durationChange == 0) {
+      setState(() => _isEditingDuration = false);
+      return;
+    }
+
+    if (durationChange > 0) {
+      final result = SchedulingService.increaseDuration(
+        widget.task,
+        durationChange,
+        widget.dayTasks,
+        widget.selectedDate,
+      );
+
+      if (result.success) {
+        for (final task in result.updatedTasks) {
+          await repository.updateTask(task);
+        }
+        setState(() => _isEditingDuration = false);
+        _showMessage('Duration updated');
+      } else {
+        _showMessage(result.message);
+      }
+    } else {
+      final result = SchedulingService.decreaseDuration(
+        widget.task,
+        durationChange.abs(),
+        widget.dayTasks,
+        widget.selectedDate,
+        cascadePull: true,
+      );
+
+      if (result.success) {
+        for (final task in result.updatedTasks) {
+          await repository.updateTask(task);
+        }
+        setState(() => _isEditingDuration = false);
+        _showMessage('Duration updated');
+      } else {
+        _showMessage(result.message);
+      }
+    }
+  }
+
+  void _toggleCompletion() async {
+    final repository = ref.read(taskRepositoryProvider);
+    final wasCompleted = widget.task.isCompleted;
+
+    if (wasCompleted) {
+      final updatedTask = widget.task.copyWith(
+        isCompleted: false,
+        completedAt: null,
+      );
+      await repository.updateTask(updatedTask);
+      _showMessage('Task marked as incomplete');
+    } else {
+      final updatedTask = widget.task.copyWith(
+        isCompleted: true,
+        completedAt: DateTime.now(),
+      );
+      await repository.updateTask(updatedTask);
+      _showMessage('Task completed! 🎉');
+    }
+
+    if (mounted) Navigator.pop(context);
   }
 
   void _showDeleteConfirmation() {
@@ -371,77 +821,6 @@ class _TaskDetailSheetState extends ConsumerState<TaskDetailSheet> {
         ],
       ),
     );
-  }
-
-  void _saveChanges() async {
-    final newTitle = _titleController.text.trim();
-    if (newTitle.isEmpty) {
-      _showMessage('Please enter a title');
-      return;
-    }
-
-    final repository = ref.read(taskRepositoryProvider);
-    final durationChange =
-        _currentDuration.round() - widget.task.durationMinutes;
-
-    if (durationChange != 0 || newTitle != widget.task.title) {
-      if (durationChange > 0) {
-        final result = SchedulingService.increaseDuration(
-          widget.task,
-          durationChange,
-          widget.dayTasks,
-          widget.selectedDate,
-        );
-
-        if (result.success) {
-          for (final task in result.updatedTasks) {
-            if (task.id == widget.task.id) {
-              task.title = newTitle;
-            }
-            await repository.updateTask(task);
-          }
-          if (mounted) {
-            Navigator.pop(context);
-            _showMessage('Task updated');
-          }
-        } else {
-          _showMessage(result.message);
-        }
-      } else if (durationChange < 0) {
-        final result = SchedulingService.decreaseDuration(
-          widget.task,
-          durationChange.abs(),
-          widget.dayTasks,
-          widget.selectedDate,
-          cascadePull: true,
-        );
-
-        if (result.success) {
-          for (final task in result.updatedTasks) {
-            if (task.id == widget.task.id) {
-              task.title = newTitle;
-            }
-            await repository.updateTask(task);
-          }
-          if (mounted) {
-            Navigator.pop(context);
-            _showMessage('Task updated');
-          }
-        } else {
-          _showMessage(result.message);
-        }
-      } else {
-        // Only title changed
-        final updatedTask = widget.task.copyWith(title: newTitle);
-        await repository.updateTask(updatedTask);
-        if (mounted) {
-          Navigator.pop(context);
-          _showMessage('Task updated');
-        }
-      }
-    } else {
-      Navigator.pop(context);
-    }
   }
 
   void _showMessage(String message) {
