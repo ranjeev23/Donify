@@ -54,6 +54,42 @@ class ScheduleResult {
   }
 }
 
+/// Result of immediate task insertion
+class ImmediateTaskResult {
+  final bool success;
+  final String message;
+  final List<Task> tasksToAdd;
+  final List<Task> tasksToUpdate;
+  final List<Task> tasksToDelete;
+
+  ImmediateTaskResult({
+    required this.success,
+    required this.message,
+    this.tasksToAdd = const [],
+    this.tasksToUpdate = const [],
+    this.tasksToDelete = const [],
+  });
+
+  factory ImmediateTaskResult.success({
+    required String message,
+    required List<Task> tasksToAdd,
+    required List<Task> tasksToUpdate,
+    required List<Task> tasksToDelete,
+  }) {
+    return ImmediateTaskResult(
+      success: true,
+      message: message,
+      tasksToAdd: tasksToAdd,
+      tasksToUpdate: tasksToUpdate,
+      tasksToDelete: tasksToDelete,
+    );
+  }
+
+  factory ImmediateTaskResult.failure(String message) {
+    return ImmediateTaskResult(success: false, message: message);
+  }
+}
+
 /// Smart Scheduling Service
 /// Handles auto-assignment, duration changes, and cascade shifting
 class SchedulingService {
@@ -173,6 +209,124 @@ class SchedulingService {
   static int getTotalFreeMinutes(List<Task> dayTasks, DateTime date) {
     final gaps = findFreeGaps(dayTasks, date);
     return gaps.fold(0, (sum, gap) => sum + gap.durationMinutes);
+  }
+
+  /// Calculate the maximum possible duration for a fixed task at a given start time
+  ///
+  /// This algorithm considers:
+  /// 1. When a fixed task overlaps an existing task, that task moves AFTER the fixed task
+  /// 2. The portion of the overlapping task BEFORE the fixed start becomes FREE time
+  /// 3. Max duration = until next fixed task OR until (day end - pushed tasks)
+  static ({int maxMinutes, Task? limitingTask, String reason})
+  getMaxFixedTaskDuration({
+    required DateTime startTime,
+    required List<Task> dayTasks,
+    required DateTime date,
+  }) {
+    final dayEnd = getDayEnd(date);
+
+    // Calculate time until day end
+    final untilDayEnd = dayEnd.difference(startTime).inMinutes;
+    if (untilDayEnd <= 0) {
+      return (
+        maxMinutes: 0,
+        limitingTask: null,
+        reason: 'Start time is at or after sleep time',
+      );
+    }
+
+    // Clone and sort tasks
+    final sortedTasks =
+        dayTasks
+            .where((t) => !t.isCompleted && t.dueDate != null)
+            .map((t) => t.copyWith())
+            .toList()
+          ..sort((a, b) => a.dueDate!.compareTo(b.dueDate!));
+
+    // Find the next fixed task after start time
+    Task? nextFixedTask;
+    for (final task in sortedTasks) {
+      if (task.isFixed && task.dueDate!.isAfter(startTime)) {
+        nextFixedTask = task;
+        break;
+      }
+    }
+
+    // If there's a fixed task after, max is limited to time until that fixed task
+    if (nextFixedTask != null) {
+      final untilFixed = nextFixedTask.dueDate!.difference(startTime).inMinutes;
+      return (
+        maxMinutes: untilFixed.clamp(0, 480),
+        limitingTask: nextFixedTask,
+        reason:
+            'Limited by "${nextFixedTask.title}" at ${_formatTime(nextFixedTask.dueDate!)}',
+      );
+    }
+
+    // No fixed task after - calculate based on how much can be pushed to day end
+    //
+    // For each task that would be affected:
+    // - If task starts AFTER our start time: push entire task
+    // - If task OVERLAPS with our start time: task gets moved, portion before is FREE
+    // - If task ends BEFORE our start time: not affected
+
+    int totalMinutesToPush =
+        0; // Total duration of tasks that will be pushed after our fixed task
+
+    for (final task in sortedTasks) {
+      if (task.isFixed) continue; // Fixed tasks don't move
+
+      final taskStart = task.dueDate!;
+      final taskEnd = task.endTime!;
+
+      // Case 1: Task ends before or at our start time - not affected
+      if (taskEnd.isBefore(startTime) || taskEnd.isAtSameMomentAs(startTime)) {
+        continue;
+      }
+
+      // Case 2: Task starts at or after our start time - entire task gets pushed
+      if (taskStart.isAfter(startTime) ||
+          taskStart.isAtSameMomentAs(startTime)) {
+        totalMinutesToPush += task.durationMinutes;
+        continue;
+      }
+
+      // Case 3: Task overlaps (starts before, ends after our start time)
+      // The ENTIRE task gets moved after fixed task
+      // The portion before (taskStart to startTime) becomes FREE - not counted against us
+      if (taskStart.isBefore(startTime) && taskEnd.isAfter(startTime)) {
+        // Entire task duration needs to fit after our fixed task
+        totalMinutesToPush += task.durationMinutes;
+        // Note: The gap from taskStart to startTime becomes free time
+        // This is correct because we're not adding it to totalMinutesToPush
+      }
+    }
+
+    // Max duration = time from start to day end - duration of all tasks that need to fit after
+    final maxMinutes = untilDayEnd - totalMinutesToPush;
+
+    if (maxMinutes <= 0) {
+      return (
+        maxMinutes: 0,
+        limitingTask: null,
+        reason: 'No space - would push tasks past sleep time',
+      );
+    }
+
+    // Provide helpful context
+    String reason;
+    if (totalMinutesToPush > 0) {
+      reason =
+          'Available (${_formatMinutes(totalMinutesToPush)} of tasks will shift)';
+    } else {
+      reason = 'Available until sleep time';
+    }
+
+    return (
+      maxMinutes: maxMinutes.clamp(0, 480),
+      limitingTask: null,
+      reason: reason,
+    );
   }
 
   /// Calculate the maximum possible increase for a specific task
@@ -335,6 +489,103 @@ class SchedulingService {
     return ScheduleResult.success(
       'Duration decreased by ${_formatMinutes(reduceMinutes)}',
       updatedTasks,
+    );
+  }
+
+  /// Prepone all tasks after a completed/deleted task to fill the gap
+  /// Excludes the specified task (completed/deleted) from the list
+  /// Prepone all tasks after a completed/deleted task to fill the gap
+  /// Excludes the specified task (completed/deleted) from the list
+  static ScheduleResult preponeAfterRemoval(
+    Task removedTask,
+    List<Task> dayTasks,
+    DateTime date,
+  ) {
+    final now = DateTime.now();
+
+    // Get all fixed tasks (they act as barriers)
+    final fixedTasks =
+        dayTasks
+            .where((t) => t.isFixed && !t.isCompleted && t.id != removedTask.id)
+            .toList()
+          ..sort((a, b) => a.dueDate!.compareTo(b.dueDate!));
+
+    // Get movable tasks that are after the removed task
+    final movableTasks =
+        dayTasks
+            .where(
+              (t) =>
+                  t.id != removedTask.id &&
+                  !t.isCompleted &&
+                  !t.isFixed &&
+                  t.dueDate != null &&
+                  (t.dueDate!.isAfter(removedTask.dueDate!) ||
+                      t.dueDate!.isAtSameMomentAs(removedTask.dueDate!)),
+            )
+            .map((t) => t.copyWith())
+            .toList()
+          ..sort((a, b) => a.dueDate!.compareTo(b.dueDate!));
+
+    if (movableTasks.isEmpty) {
+      return ScheduleResult.success('No tasks to adjust', []);
+    }
+
+    // Start preponing from the removed task's start time (or current time if task was running)
+    DateTime pullTo = removedTask.dueDate!;
+    if (pullTo.isBefore(now)) {
+      pullTo = DateTime(now.year, now.month, now.day, now.hour, now.minute + 1);
+    }
+
+    final tasksToMove = <Task>[];
+
+    for (final task in movableTasks) {
+      // Check if placing task at pullTo would overlap with any fixed task
+      bool placed = false;
+
+      while (!placed) {
+        final tentativeEnd = pullTo.add(
+          Duration(minutes: task.durationMinutes),
+        );
+        bool overlapsFixed = false;
+
+        for (final fixed in fixedTasks) {
+          // Check overlap: (StartA < EndB) and (EndA > StartB)
+          if (pullTo.isBefore(fixed.endTime!) &&
+              tentativeEnd.isAfter(fixed.dueDate!)) {
+            // Overlaps! Skip to after this fixed task
+            pullTo = fixed.endTime!;
+            overlapsFixed = true;
+            break;
+          }
+        }
+
+        if (!overlapsFixed) {
+          placed = true;
+        }
+      }
+
+      // Only move if we are actually preponing (moving earlier)
+      // If pullTo is after original time, it means a fixed task forced us later,
+      // so we should probably keep it where it is (or move it to pullTo if we want to close gaps strictly)
+      // User said "prepone", so strictly earlier or same.
+      if (pullTo.isBefore(task.dueDate!)) {
+        task.dueDate = pullTo;
+        tasksToMove.add(task);
+        pullTo = task.endTime!;
+      } else {
+        // We caught up to the original schedule (or passed it due to fixed tasks)
+        // Continue from this task's original end (or current end if we moved it)
+        pullTo = task.endTime!;
+      }
+    }
+
+    if (tasksToMove.isEmpty) {
+      return ScheduleResult.success('No tasks to adjust', []);
+    }
+
+    return ScheduleResult.success(
+      '${tasksToMove.length} tasks preponed',
+      tasksToMove,
     );
   }
 
@@ -559,11 +810,25 @@ class SchedulingService {
     return tasks;
   }
 
+  /// Check if two tasks overlap in time
+  /// Adjacent tasks (A ends exactly when B starts) do NOT overlap
   static bool _tasksOverlap(Task a, Task b) {
     if (a.dueDate == null || b.dueDate == null) return false;
-    return !(a.endTime!.isBefore(b.dueDate!) ||
-            b.endTime!.isBefore(a.dueDate!)) &&
-        a.id != b.id;
+    if (a.id == b.id) return false;
+
+    // Tasks don't overlap if one ends at or before the other starts
+    // A: [----]
+    // B:      [----]  <- No overlap (A ends at same time B starts)
+    final aEnd = a.endTime!;
+    final bEnd = b.endTime!;
+    final aStart = a.dueDate!;
+    final bStart = b.dueDate!;
+
+    // No overlap if A ends at or before B starts, OR B ends at or before A starts
+    if (aEnd.isBefore(bStart) || aEnd.isAtSameMomentAs(bStart)) return false;
+    if (bEnd.isBefore(aStart) || bEnd.isAtSameMomentAs(aStart)) return false;
+
+    return true; // They overlap
   }
 
   static bool _isSameDay(DateTime a, DateTime b) {
@@ -586,6 +851,350 @@ class SchedulingService {
     final minute = time.minute.toString().padLeft(2, '0');
     final period = time.hour >= 12 ? 'PM' : 'AM';
     return '$hour:$minute $period';
+  }
+
+  /// Insert an immediate task, splitting the current running task if needed
+  /// Returns: tasksToDelete, tasksToAdd, tasksToUpdate
+  static ImmediateTaskResult insertImmediateTask({
+    required Task immediateTask,
+    required Task? currentRunningTask,
+    required List<Task> dayTasks,
+    required DateTime date,
+  }) {
+    final now = DateTime.now();
+    final dayEnd = getDayEnd(date);
+
+    // Set immediate task to start now
+    immediateTask.dueDate = now;
+
+    // If no task is running (free time), just insert and push
+    if (currentRunningTask == null) {
+      // Find how much space we need
+      final requiredEnd = now.add(
+        Duration(minutes: immediateTask.durationMinutes),
+      );
+
+      if (requiredEnd.isAfter(dayEnd)) {
+        return ImmediateTaskResult.failure(
+          'Not enough time today for this task',
+        );
+      }
+
+      // Clone and push subsequent tasks
+      final updatedTasks = dayTasks.map((t) => t.copyWith()).toList()
+        ..sort((a, b) => a.dueDate!.compareTo(b.dueDate!));
+
+      // Find tasks that start after now and push them
+      DateTime pushFrom = requiredEnd;
+      for (final task in updatedTasks) {
+        if (task.dueDate!.isAfter(now) || task.dueDate!.isAtSameMomentAs(now)) {
+          if (task.isFixed) {
+            // Check overlap with fixed task
+            if (pushFrom.isAfter(task.dueDate!)) {
+              return ImmediateTaskResult.failure(
+                'Would overlap with fixed task "${task.title}"',
+              );
+            }
+            pushFrom = task.endTime!;
+          } else {
+            // Push this task if needed
+            if (pushFrom.isAfter(task.dueDate!)) {
+              task.dueDate = pushFrom;
+            }
+            pushFrom = task.endTime!;
+          }
+        }
+      }
+
+      // Check if last task exceeds day end
+      if (updatedTasks.isNotEmpty) {
+        final lastTask = updatedTasks.last;
+        if (lastTask.endTime!.isAfter(dayEnd)) {
+          return ImmediateTaskResult.failure(
+            'Not enough space today - tasks would exceed sleep time',
+          );
+        }
+      }
+
+      return ImmediateTaskResult.success(
+        message: 'Immediate task added',
+        tasksToAdd: [immediateTask],
+        tasksToUpdate: updatedTasks,
+        tasksToDelete: [],
+      );
+    }
+
+    // A task is running - need to split it
+    final runningTask = currentRunningTask;
+    final taskStart = runningTask.dueDate!;
+    final elapsedMinutes = now.difference(taskStart).inMinutes;
+    final remainingMinutes = runningTask.durationMinutes - elapsedMinutes;
+
+    if (remainingMinutes <= 0) {
+      // Task has actually ended, treat as free time
+      return insertImmediateTask(
+        immediateTask: immediateTask,
+        currentRunningTask: null,
+        dayTasks: dayTasks,
+        date: date,
+      );
+    }
+
+    // Create Part 1: The elapsed portion (stays incomplete)
+    final part1 = Task()
+      ..title = runningTask.title
+      ..dueDate = taskStart
+      ..durationMinutes = elapsedMinutes > 0 ? elapsedMinutes : 1
+      ..isFixed = runningTask.isFixed
+      ..category = runningTask.category
+      ..description = runningTask.description
+      ..isCompleted = false;
+
+    // Create Part 2: The remaining portion
+    final immediateEnd = now.add(
+      Duration(minutes: immediateTask.durationMinutes),
+    );
+    final part2 = Task()
+      ..title = '${runningTask.title} (continued)'
+      ..dueDate = immediateEnd
+      ..durationMinutes = remainingMinutes
+      ..isFixed =
+          false // Part 2 is not fixed, can be moved
+      ..category = runningTask.category
+      ..description = runningTask.description
+      ..isCompleted = false;
+
+    // Calculate where remaining tasks should go
+    final afterPart2 = part2.endTime!;
+
+    // Clone and update subsequent tasks
+    final updatedTasks = <Task>[];
+    DateTime pushFrom = afterPart2;
+
+    final sortedTasks =
+        dayTasks
+            .where((t) => t.id != runningTask.id) // Exclude the running task
+            .map((t) => t.copyWith())
+            .toList()
+          ..sort((a, b) => a.dueDate!.compareTo(b.dueDate!));
+
+    for (final task in sortedTasks) {
+      if (task.dueDate!.isAfter(now) || task.dueDate!.isAtSameMomentAs(now)) {
+        if (task.isFixed) {
+          if (pushFrom.isAfter(task.dueDate!)) {
+            return ImmediateTaskResult.failure(
+              'Would overlap with fixed task "${task.title}"',
+            );
+          }
+          pushFrom = task.endTime!;
+        } else {
+          if (pushFrom.isAfter(task.dueDate!)) {
+            task.dueDate = pushFrom;
+          }
+          pushFrom = task.endTime!;
+        }
+      }
+      updatedTasks.add(task);
+    }
+
+    // Check day boundary
+    if (updatedTasks.isNotEmpty) {
+      final lastTask = updatedTasks.last;
+      if (lastTask.endTime!.isAfter(dayEnd)) {
+        return ImmediateTaskResult.failure(
+          'Not enough space - tasks would exceed sleep time',
+        );
+      }
+    }
+    if (part2.endTime!.isAfter(dayEnd)) {
+      return ImmediateTaskResult.failure(
+        'Not enough space - remaining task would exceed sleep time',
+      );
+    }
+
+    return ImmediateTaskResult.success(
+      message: 'Task split. Immediate task inserted.',
+      tasksToAdd: [part1, immediateTask, part2],
+      tasksToUpdate: updatedTasks,
+      tasksToDelete: [runningTask],
+    );
+  }
+
+  /// Insert a fixed task and reschedule any overlapping tasks
+  ///
+  /// Logic:
+  /// 1. Fixed task is placed at its specified time
+  /// 2. Any overlapping movable task is moved to start AFTER the fixed task ends
+  /// 3. All tasks after the overlapping task are pushed forward accordingly
+  /// 4. Gap between fixed task start and previous task end becomes free time
+  static ScheduleResult insertFixedTaskWithReschedule({
+    required Task fixedTask,
+    required List<Task> dayTasks,
+    required DateTime date,
+  }) {
+    if (fixedTask.dueDate == null) {
+      return ScheduleResult.failure('Fixed task must have a start time');
+    }
+
+    final now = DateTime.now();
+    final dayEnd = getDayEnd(date);
+    fixedTask.isFixed = true;
+
+    final fixedStart = fixedTask.dueDate!;
+    final fixedEnd = fixedTask.endTime!;
+
+    // Check for overlap with other FIXED tasks (these cannot be moved)
+    for (final task in dayTasks) {
+      if (task.isFixed && _tasksOverlap(fixedTask, task)) {
+        return ScheduleResult.failure(
+          'Conflicts with fixed task "${task.title}"',
+        );
+      }
+    }
+
+    // Clone all tasks for modification
+    final allTasks = dayTasks.map((t) => t.copyWith()).toList();
+
+    // Find tasks that overlap with the fixed task
+    final overlappingTasks = <Task>[];
+    final nonOverlappingBefore =
+        <Task>[]; // Tasks before fixed task (no overlap)
+    final nonOverlappingAfter = <Task>[]; // Tasks after fixed task (no overlap)
+    final tasksToDelete = <Task>[];
+    final tasksToAdd = <Task>[];
+
+    for (final task in allTasks) {
+      if (task.isFixed) {
+        // Keep fixed tasks as-is (we already checked for conflicts)
+        if (task.endTime!.isBefore(fixedStart) ||
+            task.endTime!.isAtSameMomentAs(fixedStart)) {
+          nonOverlappingBefore.add(task);
+        } else {
+          nonOverlappingAfter.add(task);
+        }
+        continue;
+      }
+
+      // Check if this movable task overlaps with fixed task
+      if (_tasksOverlap(fixedTask, task)) {
+        // Check if task is currently running
+        final isRunning =
+            task.dueDate!.isBefore(now) && task.endTime!.isAfter(now);
+
+        if (isRunning) {
+          // Split the running task
+          final elapsedMinutes = now.difference(task.dueDate!).inMinutes;
+          final remainingMinutes = task.durationMinutes - elapsedMinutes;
+
+          // Part 1: Elapsed portion (stays in place, ends now)
+          if (elapsedMinutes > 0) {
+            final part1 = Task()
+              ..title = task.title
+              ..dueDate = task.dueDate
+              ..durationMinutes = elapsedMinutes
+              ..isFixed = false
+              ..category = task.category
+              ..description = task.description
+              ..isCompleted = false;
+            nonOverlappingBefore.add(part1);
+            tasksToAdd.add(part1);
+          }
+
+          // Part 2: Remaining portion (will be scheduled after fixed task)
+          if (remainingMinutes > 0) {
+            final part2 = Task()
+              ..title = '${task.title} (continued)'
+              ..dueDate =
+                  fixedEnd // Start after fixed task
+              ..durationMinutes = remainingMinutes
+              ..isFixed = false
+              ..category = task.category
+              ..description = task.description
+              ..isCompleted = false;
+            overlappingTasks.add(part2);
+            tasksToAdd.add(part2);
+          }
+
+          tasksToDelete.add(task);
+        } else {
+          // Not running - move entire task after fixed task
+          task.dueDate = fixedEnd;
+          overlappingTasks.add(task);
+        }
+      } else {
+        // No overlap - categorize by position
+        if (task.endTime!.isBefore(fixedStart) ||
+            task.endTime!.isAtSameMomentAs(fixedStart)) {
+          nonOverlappingBefore.add(task);
+        } else if (task.dueDate!.isAfter(fixedEnd) ||
+            task.dueDate!.isAtSameMomentAs(fixedEnd)) {
+          nonOverlappingAfter.add(task);
+        } else {
+          // Task spans across - shouldn't happen if overlap detection is correct
+          nonOverlappingAfter.add(task);
+        }
+      }
+    }
+
+    // Sort each group
+    nonOverlappingBefore.sort((a, b) => a.dueDate!.compareTo(b.dueDate!));
+    overlappingTasks.sort((a, b) => a.dueDate!.compareTo(b.dueDate!));
+    nonOverlappingAfter.sort((a, b) => a.dueDate!.compareTo(b.dueDate!));
+
+    // Build final schedule:
+    // [nonOverlappingBefore] -> [GAP/FREE] -> [fixedTask] -> [overlappingTasks] -> [nonOverlappingAfter]
+
+    // Cascade push from fixed task end
+    DateTime pushFrom = fixedEnd;
+
+    // First, place overlapping tasks right after fixed task
+    for (final task in overlappingTasks) {
+      task.dueDate = pushFrom;
+      pushFrom = task.endTime!;
+    }
+
+    // Then, push non-overlapping after tasks if needed
+    for (final task in nonOverlappingAfter) {
+      if (task.isFixed) {
+        // Check if we would overlap with this fixed task
+        if (pushFrom.isAfter(task.dueDate!)) {
+          return ScheduleResult.failure(
+            'Cannot fit - would overlap with fixed task "${task.title}"',
+          );
+        }
+        pushFrom = task.endTime!;
+      } else {
+        // Push forward if needed
+        if (pushFrom.isAfter(task.dueDate!)) {
+          task.dueDate = pushFrom;
+        }
+        pushFrom = task.endTime!;
+      }
+    }
+
+    // Combine all tasks
+    final finalTasks = <Task>[
+      ...nonOverlappingBefore,
+      fixedTask,
+      ...overlappingTasks,
+      ...nonOverlappingAfter,
+    ];
+
+    // Sort final list
+    finalTasks.sort((a, b) => a.dueDate!.compareTo(b.dueDate!));
+
+    // Check day boundary
+    if (finalTasks.isNotEmpty && finalTasks.last.endTime!.isAfter(dayEnd)) {
+      final overBy = finalTasks.last.endTime!.difference(dayEnd).inMinutes;
+      return ScheduleResult.failure(
+        'Not enough space - tasks exceed sleep time by ${_formatMinutes(overBy)}',
+      );
+    }
+
+    return ScheduleResult.success(
+      'Fixed task added. ${overlappingTasks.length} tasks moved.',
+      finalTasks,
+    );
   }
 }
 

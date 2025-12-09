@@ -408,6 +408,81 @@ class _AddTaskSheetState extends ConsumerState<AddTaskSheet> {
                       ),
                     ],
                   ).animate().fadeIn(delay: 200.ms),
+                  // Show availability info when start time is selected
+                  if (_startTime != null) ...[
+                    const Gap(12),
+                    FutureBuilder(
+                      future: _getAvailabilityInfo(),
+                      builder: (context, snapshot) {
+                        if (!snapshot.hasData) return const SizedBox.shrink();
+                        final info = snapshot.data!;
+                        final hasSpace = info.maxMinutes > 0;
+
+                        return Container(
+                          padding: const EdgeInsets.all(12),
+                          decoration: BoxDecoration(
+                            color: hasSpace
+                                ? Colors.blue.withAlpha(15)
+                                : Colors.red.withAlpha(15),
+                            borderRadius: BorderRadius.circular(10),
+                            border: Border.all(
+                              color: hasSpace
+                                  ? Colors.blue.withAlpha(50)
+                                  : Colors.red.withAlpha(50),
+                            ),
+                          ),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Row(
+                                children: [
+                                  Icon(
+                                    hasSpace
+                                        ? Icons.info_outline
+                                        : Icons.warning_amber,
+                                    size: 16,
+                                    color: hasSpace ? Colors.blue : Colors.red,
+                                  ),
+                                  const Gap(8),
+                                  Text(
+                                    hasSpace
+                                        ? 'Max duration: ${_formatDuration(info.maxMinutes)}'
+                                        : 'No space available',
+                                    style: TextStyle(
+                                      color: hasSpace
+                                          ? Colors.blue
+                                          : Colors.red,
+                                      fontWeight: FontWeight.w600,
+                                      fontSize: 13,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                              if (info.reason.isNotEmpty) ...[
+                                const Gap(4),
+                                Text(
+                                  info.reason,
+                                  style: theme.textTheme.labelSmall?.copyWith(
+                                    color: colorScheme.outline,
+                                  ),
+                                ),
+                              ],
+                              if (!hasSpace) ...[
+                                const Gap(8),
+                                Text(
+                                  'Delete or shorten existing tasks to make room',
+                                  style: theme.textTheme.labelSmall?.copyWith(
+                                    color: Colors.red.shade700,
+                                    fontStyle: FontStyle.italic,
+                                  ),
+                                ),
+                              ],
+                            ],
+                          ),
+                        );
+                      },
+                    ),
+                  ],
                   if (_startTime != null && _endTime != null) ...[
                     const Gap(12),
                     Container(
@@ -598,36 +673,99 @@ class _AddTaskSheetState extends ConsumerState<AddTaskSheet> {
         return;
       }
 
-      final hasConflict = dayTasks.any((t) {
-        final tStart = t.dueDate!;
-        final tEnd = t.endTime!;
-        return (startDateTime.isBefore(tEnd) && newEnd.isAfter(tStart));
-      });
-
-      if (hasConflict) {
-        _showError('This time slot conflicts with an existing task');
-        return;
-      }
-
-      final task = Task()
+      // Create the fixed task
+      final fixedTask = Task()
         ..title = _titleController.text.trim()
         ..dueDate = startDateTime
         ..durationMinutes = duration
-        ..isFixed = true; // Manual tasks are fixed
+        ..isFixed = true;
 
-      await repository.addTask(task);
+      // Use smart scheduling to insert and reschedule conflicting tasks
+      final result = SchedulingService.insertFixedTaskWithReschedule(
+        fixedTask: fixedTask,
+        dayTasks: dayTasks,
+        date: _selectedDate!,
+      );
+
+      if (!result.success) {
+        _showError(result.message);
+        return;
+      }
+
+      // Apply the changes - update all tasks
+      for (final task in result.updatedTasks) {
+        if (task.id == 0) {
+          // New task
+          await repository.addTask(task);
+        } else {
+          await repository.updateTask(task);
+        }
+      }
+
       if (mounted) Navigator.pop(context);
     }
   }
 
   void _showError(String message) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        icon: const Icon(Icons.error_outline, color: Colors.red, size: 40),
+        title: const Text('Cannot Add Task'),
         content: Text(message),
-        behavior: SnackBarBehavior.floating,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+        actions: [
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('OK'),
+          ),
+        ],
       ),
     );
+  }
+
+  Future<({int maxMinutes, String reason})> _getAvailabilityInfo() async {
+    if (_startTime == null || _selectedDate == null) {
+      return (maxMinutes: 0, reason: 'Select start time');
+    }
+
+    final repository = ref.read(taskRepositoryProvider);
+
+    // Load user preferences and set day boundaries
+    final prefs = await repository.getPreferences();
+    SchedulingService.setDayBoundaries(
+      wakeHour: prefs.wakeUpHour,
+      wakeMinute: prefs.wakeUpMinute,
+      sleepHour: prefs.sleepHour,
+      sleepMinute: prefs.sleepMinute,
+    );
+
+    final allTasks = await repository.getAllTasks();
+
+    final dayTasks = allTasks
+        .where(
+          (t) =>
+              t.dueDate != null &&
+              t.dueDate!.year == _selectedDate!.year &&
+              t.dueDate!.month == _selectedDate!.month &&
+              t.dueDate!.day == _selectedDate!.day,
+        )
+        .toList();
+
+    final startDateTime = DateTime(
+      _selectedDate!.year,
+      _selectedDate!.month,
+      _selectedDate!.day,
+      _startTime!.hour,
+      _startTime!.minute,
+    );
+
+    final result = SchedulingService.getMaxFixedTaskDuration(
+      startTime: startDateTime,
+      dayTasks: dayTasks,
+      date: _selectedDate!,
+    );
+
+    return (maxMinutes: result.maxMinutes, reason: result.reason);
   }
 }
 

@@ -45,6 +45,7 @@ dependencies:
   flutter_local_notifications: ^17.1.0
   timezone: ^0.9.2
   image_picker: ^1.0.7
+  live_activities: ^2.4.3
 
 dev_dependencies:
   flutter_test:

@@ -743,8 +743,12 @@ class _TaskDetailSheetState extends ConsumerState<TaskDetailSheet> {
         for (final task in result.updatedTasks) {
           await repository.updateTask(task);
         }
+        // Update the local task duration
+        widget.task.durationMinutes = _currentDuration.round();
         setState(() => _isEditingDuration = false);
         _showMessage('Duration updated');
+        // Close sheet so timeline refreshes
+        if (mounted) Navigator.pop(context);
       } else {
         _showMessage(result.message);
       }
@@ -761,8 +765,12 @@ class _TaskDetailSheetState extends ConsumerState<TaskDetailSheet> {
         for (final task in result.updatedTasks) {
           await repository.updateTask(task);
         }
+        // Update the local task duration
+        widget.task.durationMinutes = _currentDuration.round();
         setState(() => _isEditingDuration = false);
         _showMessage('Duration updated');
+        // Close sheet so timeline refreshes
+        if (mounted) Navigator.pop(context);
       } else {
         _showMessage(result.message);
       }
@@ -772,20 +780,76 @@ class _TaskDetailSheetState extends ConsumerState<TaskDetailSheet> {
   void _toggleCompletion() async {
     final repository = ref.read(taskRepositoryProvider);
     final wasCompleted = widget.task.isCompleted;
+    final now = DateTime.now();
 
     if (wasCompleted) {
-      final updatedTask = widget.task.copyWith(
+      // Marking as incomplete - restore and push others if needed
+      final originalIsFixed = widget.task.isFixed;
+
+      final taskToRestore = widget.task.copyWith(
         isCompleted: false,
         completedAt: null,
+        isFixed: true, // Temporarily treat as fixed for scheduling
       );
-      await repository.updateTask(updatedTask);
-      _showMessage('Task marked as incomplete');
+
+      // Load prefs for boundaries
+      final prefs = await repository.getPreferences();
+      SchedulingService.setDayBoundaries(
+        wakeHour: prefs.wakeUpHour,
+        wakeMinute: prefs.wakeUpMinute,
+        sleepHour: prefs.sleepHour,
+        sleepMinute: prefs.sleepMinute,
+      );
+
+      final result = SchedulingService.insertFixedTaskWithReschedule(
+        fixedTask: taskToRestore,
+        dayTasks: widget.dayTasks.where((t) => t.id != widget.task.id).toList(),
+        date: widget.selectedDate,
+      );
+
+      if (result.success) {
+        // Update all affected tasks
+        for (final task in result.updatedTasks) {
+          if (task.id == widget.task.id) {
+            // Restore original fixed status
+            task.isFixed = originalIsFixed;
+          }
+          await repository.updateTask(task);
+        }
+        _showMessage('Task marked as incomplete');
+      } else {
+        _showMessage('Cannot restore: ${result.message}');
+        return; // Don't close sheet if failed
+      }
     } else {
+      // Marking as complete
       final updatedTask = widget.task.copyWith(
         isCompleted: true,
-        completedAt: DateTime.now(),
+        completedAt: now,
       );
       await repository.updateTask(updatedTask);
+
+      // Prepone subsequent tasks to fill the gap
+      final prefs = await repository.getPreferences();
+      SchedulingService.setDayBoundaries(
+        wakeHour: prefs.wakeUpHour,
+        wakeMinute: prefs.wakeUpMinute,
+        sleepHour: prefs.sleepHour,
+        sleepMinute: prefs.sleepMinute,
+      );
+
+      final preponeResult = SchedulingService.preponeAfterRemoval(
+        widget.task,
+        widget.dayTasks,
+        widget.selectedDate,
+      );
+
+      if (preponeResult.success && preponeResult.updatedTasks.isNotEmpty) {
+        for (final task in preponeResult.updatedTasks) {
+          await repository.updateTask(task);
+        }
+      }
+
       _showMessage('Task completed! 🎉');
     }
 
@@ -809,6 +873,29 @@ class _TaskDetailSheetState extends ConsumerState<TaskDetailSheet> {
             onPressed: () async {
               Navigator.pop(ctx);
               final repository = ref.read(taskRepositoryProvider);
+
+              // Prepone subsequent tasks to fill the gap BEFORE deleting
+              final prefs = await repository.getPreferences();
+              SchedulingService.setDayBoundaries(
+                wakeHour: prefs.wakeUpHour,
+                wakeMinute: prefs.wakeUpMinute,
+                sleepHour: prefs.sleepHour,
+                sleepMinute: prefs.sleepMinute,
+              );
+
+              final preponeResult = SchedulingService.preponeAfterRemoval(
+                widget.task,
+                widget.dayTasks,
+                widget.selectedDate,
+              );
+
+              if (preponeResult.success &&
+                  preponeResult.updatedTasks.isNotEmpty) {
+                for (final task in preponeResult.updatedTasks) {
+                  await repository.updateTask(task);
+                }
+              }
+
               await repository.deleteTask(widget.task.id);
               if (mounted) {
                 Navigator.pop(context);

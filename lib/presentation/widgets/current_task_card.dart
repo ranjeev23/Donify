@@ -7,8 +7,16 @@ import 'package:gap/gap.dart';
 class CurrentTaskCard extends StatefulWidget {
   final Task? currentTask;
   final Task? nextTask;
+  final VoidCallback? onComplete;
+  final VoidCallback? onAddImmediate;
 
-  const CurrentTaskCard({super.key, this.currentTask, this.nextTask});
+  const CurrentTaskCard({
+    super.key,
+    this.currentTask,
+    this.nextTask,
+    this.onComplete,
+    this.onAddImmediate,
+  });
 
   @override
   State<CurrentTaskCard> createState() => _CurrentTaskCardState();
@@ -199,7 +207,7 @@ class _CurrentTaskCardState extends State<CurrentTaskCard> {
           ),
           const Gap(16),
 
-          // Time remaining
+          // Time remaining and actions
           Row(
             children: [
               Expanded(
@@ -211,17 +219,19 @@ class _CurrentTaskCardState extends State<CurrentTaskCard> {
 
               Row(
                 children: [
+                  // Urgent task button
                   _ActionButton(
-                    icon: Icons.skip_next,
-                    label: 'Skip',
-                    onTap: () {},
-                    color: colorScheme.outline,
+                    icon: Icons.flash_on,
+                    label: 'Urgent',
+                    onTap: widget.onAddImmediate ?? () {},
+                    color: Colors.orange,
                   ),
                   const Gap(8),
+                  // Done button
                   _ActionButton(
                     icon: Icons.check_circle,
                     label: 'Done',
-                    onTap: () {},
+                    onTap: widget.onComplete ?? () {},
                     color: Colors.green,
                   ),
                 ],
@@ -286,42 +296,64 @@ class _CurrentTaskCardState extends State<CurrentTaskCard> {
         borderRadius: BorderRadius.circular(24),
         border: Border.all(color: Colors.green.withAlpha(50), width: 1),
       ),
-      child: Row(
+      child: Column(
         children: [
-          Container(
-            padding: const EdgeInsets.all(16),
-            decoration: BoxDecoration(
-              color: Colors.green.withAlpha(30),
-              shape: BoxShape.circle,
-            ),
-            child: const Icon(
-              Icons.self_improvement,
-              color: Colors.green,
-              size: 32,
-            ),
+          Row(
+            children: [
+              Container(
+                padding: const EdgeInsets.all(16),
+                decoration: BoxDecoration(
+                  color: Colors.green.withAlpha(30),
+                  shape: BoxShape.circle,
+                ),
+                child: const Icon(
+                  Icons.self_improvement,
+                  color: Colors.green,
+                  size: 32,
+                ),
+              ),
+              const Gap(16),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'You\'re Free!',
+                      style: theme.textTheme.titleLarge?.copyWith(
+                        fontWeight: FontWeight.bold,
+                        color: Colors.green.shade700,
+                      ),
+                    ),
+                    const Gap(4),
+                    Text(
+                      widget.nextTask != null
+                          ? 'Next task: ${widget.nextTask!.title}'
+                          : 'No more tasks scheduled',
+                      style: theme.textTheme.bodyMedium?.copyWith(
+                        color: colorScheme.onSurfaceVariant,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
           ),
           const Gap(16),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  'You\'re Free!',
-                  style: theme.textTheme.titleLarge?.copyWith(
-                    fontWeight: FontWeight.bold,
-                    color: Colors.green.shade700,
-                  ),
+          // Add task now button
+          SizedBox(
+            width: double.infinity,
+            child: OutlinedButton.icon(
+              onPressed: widget.onAddImmediate,
+              icon: const Icon(Icons.flash_on, size: 18),
+              label: const Text('Add Task Now'),
+              style: OutlinedButton.styleFrom(
+                foregroundColor: Colors.orange,
+                side: const BorderSide(color: Colors.orange),
+                padding: const EdgeInsets.symmetric(vertical: 12),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12),
                 ),
-                const Gap(4),
-                Text(
-                  widget.nextTask != null
-                      ? 'Next task: ${widget.nextTask!.title}'
-                      : 'No more tasks scheduled',
-                  style: theme.textTheme.bodyMedium?.copyWith(
-                    color: colorScheme.onSurfaceVariant,
-                  ),
-                ),
-              ],
+              ),
             ),
           ),
         ],

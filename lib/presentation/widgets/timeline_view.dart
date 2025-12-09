@@ -5,6 +5,7 @@ import 'package:remindlyf/data/models/task.dart';
 import 'package:remindlyf/presentation/widgets/task_detail_sheet.dart';
 import 'package:remindlyf/presentation/widgets/task_completion_dialog.dart';
 import 'package:remindlyf/presentation/widgets/day_recap_view.dart';
+import 'package:remindlyf/presentation/widgets/immediate_task_sheet.dart';
 import 'package:remindlyf/domain/providers/task_provider.dart';
 import 'package:intl/intl.dart';
 import 'package:gap/gap.dart';
@@ -179,9 +180,12 @@ class _TimelineViewState extends ConsumerState<TimelineView> {
               ? _CurrentTaskBanner(
                   task: currentTask,
                   onDone: () => _completeTask(currentTask!),
-                  onSkip: () => _skipTask(currentTask!),
+                  onUrgent: () => _openImmediateTaskSheet(currentTask),
                 )
-              : _FreeTimeBanner(freeTime: currentFreeTime),
+              : _FreeTimeBanner(
+                  freeTime: currentFreeTime,
+                  onAddImmediate: () => _openImmediateTaskSheet(null),
+                ),
 
         // Header with reorder option
         Padding(
@@ -389,9 +393,11 @@ class _TimelineViewState extends ConsumerState<TimelineView> {
               final task = tasks.removeAt(oldIndex);
               tasks.insert(newIndex, task);
 
-              // Get wake up time from preferences
+              // Get all tasks for today to find fixed tasks
+              final allTasks = await repository.getAllTasks();
               final now = DateTime.now();
               final selectedDate = widget.selectedDate;
+
               final wakeUpTime = DateTime(
                 selectedDate.year,
                 selectedDate.month,
@@ -407,31 +413,37 @@ class _TimelineViewState extends ConsumerState<TimelineView> {
                 _sleepMinute,
               );
 
-              // Determine start time based on whether it's today or future
+              // Get all fixed tasks for today (these don't move)
+              final fixedTasks =
+                  allTasks
+                      .where(
+                        (t) =>
+                            t.dueDate != null &&
+                            _isSameDay(t.dueDate!, selectedDate) &&
+                            t.isFixed &&
+                            !t.isCompleted,
+                      )
+                      .toList()
+                    ..sort((a, b) => a.dueDate!.compareTo(b.dueDate!));
+
+              // Determine start time
               DateTime currentTime;
               final isSelectedToday = _isSameDay(selectedDate, now);
 
               if (isSelectedToday && now.isAfter(wakeUpTime)) {
-                // Today and past wake up: check if there's a current task running
-                // Get all tasks for today to find currently executing one
-                final allTasks = await repository.getAllTasks();
-                final todayTasks = allTasks
-                    .where(
-                      (t) =>
-                          t.dueDate != null &&
-                          _isSameDay(t.dueDate!, now) &&
-                          !t.isCompleted,
-                    )
-                    .toList();
-
-                // Find currently executing task (not in reorderable list)
-                // Compare by ID since object references may differ
+                // Find currently executing task (not reorderable, not fixed)
                 final reorderableTaskIds = tasks.map((t) => t.id).toSet();
+                final fixedTaskIds = fixedTasks.map((t) => t.id).toSet();
+
                 Task? currentTask;
-                for (final t in todayTasks) {
-                  if (!reorderableTaskIds.contains(
-                        t.id,
-                      ) && // Not in the reorder list
+                for (final t in allTasks.where(
+                  (t) =>
+                      t.dueDate != null &&
+                      _isSameDay(t.dueDate!, now) &&
+                      !t.isCompleted,
+                )) {
+                  if (!reorderableTaskIds.contains(t.id) &&
+                      !fixedTaskIds.contains(t.id) &&
                       t.dueDate!.isBefore(now) &&
                       t.endTime!.isAfter(now)) {
                     currentTask = t;
@@ -440,10 +452,8 @@ class _TimelineViewState extends ConsumerState<TimelineView> {
                 }
 
                 if (currentTask != null) {
-                  // Start after the current task ends
                   currentTime = currentTask.endTime!;
                 } else {
-                  // No current task, start from next minute
                   currentTime = DateTime(
                     now.year,
                     now.month,
@@ -453,30 +463,76 @@ class _TimelineViewState extends ConsumerState<TimelineView> {
                   );
                 }
               } else {
-                // Future day or before wake up: start from wake up time
                 currentTime = wakeUpTime;
               }
 
-              // Reschedule all tasks within boundaries
+              // Schedule tasks around fixed tasks
+              bool hasError = false;
+              String? errorMessage;
+
               for (final t in tasks) {
+                // Skip past any fixed tasks that start before or at current time
+                for (final fixed in fixedTasks) {
+                  // If there's a fixed task that would conflict with our current slot
+                  if (fixed.dueDate!.isBefore(
+                        currentTime.add(Duration(minutes: t.durationMinutes)),
+                      ) &&
+                      fixed.endTime!.isAfter(currentTime)) {
+                    // Skip to after this fixed task
+                    currentTime = fixed.endTime!;
+                  }
+                }
+
                 final newEndTime = currentTime.add(
                   Duration(minutes: t.durationMinutes),
                 );
-                if (newEndTime.isAfter(sleepTime)) {
-                  // Task doesn't fit, show warning
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(
-                      content: Text(
-                        'Task "${t.title}" doesn\'t fit before sleep time',
-                      ),
-                      behavior: SnackBarBehavior.floating,
-                    ),
-                  );
-                  break;
+
+                // Check if task overlaps with any fixed task
+                bool overlapsFixed = false;
+                for (final fixed in fixedTasks) {
+                  if (currentTime.isBefore(fixed.endTime!) &&
+                      newEndTime.isAfter(fixed.dueDate!)) {
+                    // Would overlap with fixed task, skip to after it
+                    currentTime = fixed.endTime!;
+                    overlapsFixed = true;
+                    break;
+                  }
                 }
-                t.dueDate = currentTime;
-                await repository.updateTask(t);
-                currentTime = t.endTime!;
+
+                if (overlapsFixed) {
+                  // Recalculate with new current time
+                  final adjustedEnd = currentTime.add(
+                    Duration(minutes: t.durationMinutes),
+                  );
+                  if (adjustedEnd.isAfter(sleepTime)) {
+                    hasError = true;
+                    errorMessage =
+                        'Task "${t.title}" doesn\'t fit before sleep time';
+                    break;
+                  }
+                  t.dueDate = currentTime;
+                  await repository.updateTask(t);
+                  currentTime = t.endTime!;
+                } else if (newEndTime.isAfter(sleepTime)) {
+                  hasError = true;
+                  errorMessage =
+                      'Task "${t.title}" doesn\'t fit before sleep time';
+                  break;
+                } else {
+                  t.dueDate = currentTime;
+                  await repository.updateTask(t);
+                  currentTime = t.endTime!;
+                }
+              }
+
+              if (hasError && errorMessage != null) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(
+                    content: Text(errorMessage),
+                    behavior: SnackBarBehavior.floating,
+                    backgroundColor: Colors.red,
+                  ),
+                );
               }
 
               // Exit reorder mode after reordering
@@ -1040,6 +1096,20 @@ class _TimelineViewState extends ConsumerState<TimelineView> {
     );
   }
 
+  void _openImmediateTaskSheet(Task? currentRunningTask) {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      useSafeArea: true,
+      backgroundColor: Colors.transparent,
+      builder: (context) => ImmediateTaskSheet(
+        currentRunningTask: currentRunningTask,
+        dayTasks: widget.allDayTasks,
+        selectedDate: widget.selectedDate,
+      ),
+    );
+  }
+
   DateTime _roundToNext5Minutes(DateTime time) {
     final minutes = time.minute;
     final roundedMinutes = ((minutes ~/ 5) + 1) * 5;
@@ -1118,50 +1188,6 @@ class _TimelineViewState extends ConsumerState<TimelineView> {
       await repository.updateTask(task);
       currentTime = task.endTime!;
     }
-  }
-
-  void _skipTask(Task task) async {
-    final repository = ref.read(taskRepositoryProvider);
-    final now = DateTime.now();
-
-    // Fetch fresh tasks from database
-    final allTasks = await repository.getAllTasks();
-    final dayTasks = allTasks
-        .where(
-          (t) =>
-              t.dueDate != null &&
-              t.dueDate!.year == widget.selectedDate.year &&
-              t.dueDate!.month == widget.selectedDate.month &&
-              t.dueDate!.day == widget.selectedDate.day,
-        )
-        .toList();
-
-    final remainingTasks =
-        dayTasks
-            .where(
-              (t) =>
-                  !t.isCompleted &&
-                  t.id != task.id &&
-                  !t.isFixed &&
-                  t.dueDate != null &&
-                  t.endTime!.isAfter(now),
-            ) // Check endTime, not dueDate
-            .toList()
-          ..sort((a, b) => a.dueDate!.compareTo(b.dueDate!));
-
-    if (remainingTasks.isEmpty) {
-      final skippedTask = task.copyWith(isCompleted: true, completedAt: now);
-      await repository.updateTask(skippedTask);
-      return;
-    }
-
-    // Move skipped task to end
-    DateTime lastTaskEnd = remainingTasks.last.endTime!;
-    task.dueDate = lastTaskEnd;
-    await repository.updateTask(task);
-
-    // Pull remaining tasks forward
-    await _pullTasksForward(task, now);
   }
 
   Widget _buildEmptyTimeline(BuildContext context) {
@@ -1330,12 +1356,12 @@ class _TimelineViewState extends ConsumerState<TimelineView> {
 class _CurrentTaskBanner extends StatelessWidget {
   final Task task;
   final VoidCallback onDone;
-  final VoidCallback onSkip;
+  final VoidCallback onUrgent;
 
   const _CurrentTaskBanner({
     required this.task,
     required this.onDone,
-    required this.onSkip,
+    required this.onUrgent,
   });
 
   @override
@@ -1375,13 +1401,38 @@ class _CurrentTaskBanner extends StatelessWidget {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(
-                  task.title,
-                  style: theme.textTheme.titleSmall?.copyWith(
-                    color: Colors.white,
-                    fontWeight: FontWeight.bold,
-                  ),
-                  overflow: TextOverflow.ellipsis,
+                Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        task.title,
+                        style: theme.textTheme.titleSmall?.copyWith(
+                          color: Colors.white,
+                          fontWeight: FontWeight.bold,
+                        ),
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                    if (task.isFixed)
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 6,
+                          vertical: 2,
+                        ),
+                        decoration: BoxDecoration(
+                          color: Colors.white.withAlpha(30),
+                          borderRadius: BorderRadius.circular(4),
+                        ),
+                        child: const Text(
+                          'FIXED',
+                          style: TextStyle(
+                            color: Colors.white70,
+                            fontSize: 9,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                      ),
+                  ],
                 ),
                 Text(
                   '${remaining.inMinutes}m remaining',
@@ -1392,23 +1443,32 @@ class _CurrentTaskBanner extends StatelessWidget {
               ],
             ),
           ),
-          TextButton(
-            onPressed: onSkip,
-            style: TextButton.styleFrom(
-              foregroundColor: Colors.white70,
-              padding: const EdgeInsets.symmetric(horizontal: 10),
+          // Urgent button
+          IconButton(
+            onPressed: onUrgent,
+            icon: const Icon(Icons.flash_on, color: Colors.amber, size: 22),
+            tooltip: 'Add Urgent Task',
+            style: IconButton.styleFrom(
+              backgroundColor: Colors.white.withAlpha(30),
+              padding: const EdgeInsets.all(8),
             ),
-            child: const Text('Skip'),
           ),
-          FilledButton(
-            onPressed: onDone,
-            style: FilledButton.styleFrom(
-              backgroundColor: Colors.white,
-              foregroundColor: Colors.pink,
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+          // Done button - only for non-fixed tasks
+          if (!task.isFixed) ...[
+            const Gap(6),
+            FilledButton(
+              onPressed: onDone,
+              style: FilledButton.styleFrom(
+                backgroundColor: Colors.white,
+                foregroundColor: Colors.pink,
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 16,
+                  vertical: 8,
+                ),
+              ),
+              child: const Text('Done'),
             ),
-            child: const Text('Done'),
-          ),
+          ],
         ],
       ),
     );
@@ -1417,8 +1477,9 @@ class _CurrentTaskBanner extends StatelessWidget {
 
 class _FreeTimeBanner extends StatelessWidget {
   final FreeTimeInfo? freeTime;
+  final VoidCallback? onAddImmediate;
 
-  const _FreeTimeBanner({this.freeTime});
+  const _FreeTimeBanner({this.freeTime, this.onAddImmediate});
 
   @override
   Widget build(BuildContext context) {
@@ -1480,18 +1541,15 @@ class _FreeTimeBanner extends StatelessWidget {
               ],
             ),
           ),
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-            decoration: BoxDecoration(
-              color: Colors.white.withAlpha(30),
-              borderRadius: BorderRadius.circular(8),
-            ),
-            child: Text(
-              _formatDuration(remaining.inMinutes),
-              style: theme.textTheme.labelMedium?.copyWith(
-                color: Colors.white,
-                fontWeight: FontWeight.bold,
-              ),
+          // Add Task Now button
+          FilledButton.icon(
+            onPressed: onAddImmediate,
+            icon: const Icon(Icons.flash_on, size: 16),
+            label: const Text('Add Task'),
+            style: FilledButton.styleFrom(
+              backgroundColor: Colors.white,
+              foregroundColor: Colors.orange,
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
             ),
           ),
         ],
