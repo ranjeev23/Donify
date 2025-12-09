@@ -14,10 +14,11 @@ class TaskRepository {
   Future<Isar> openDB() async {
     if (Isar.instanceNames.isEmpty) {
       final dir = await getApplicationDocumentsDirectory();
+      const isRelease = bool.fromEnvironment('dart.vm.product');
       return await Isar.open(
         [TaskSchema, UserPreferencesSchema],
         directory: dir.path,
-        inspector: true,
+        inspector: !isRelease, // Disable inspector in release mode
       );
     }
     return Future.value(Isar.getInstance());
