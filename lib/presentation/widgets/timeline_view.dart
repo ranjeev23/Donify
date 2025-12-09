@@ -1767,6 +1767,24 @@ class _TimelineCard extends StatelessWidget {
   Widget _buildTaskCard(BuildContext context, Task task, bool isPast) {
     final theme = Theme.of(context);
     final colorScheme = theme.colorScheme;
+    final isSubscriptionTask = task.isSubscriptionReminder;
+
+    // Subscription reminder tasks get orange styling
+    final cardColor = isSubscriptionTask
+        ? (isPast ? Colors.orange.withAlpha(15) : Colors.orange.withAlpha(30))
+        : (isPast
+              ? (task.isCompleted
+                    ? Colors.green.withAlpha(10)
+                    : colorScheme.surfaceContainerHighest.withAlpha(30))
+              : colorScheme.primaryContainer.withAlpha(40));
+
+    final borderColor = isSubscriptionTask
+        ? Colors.orange.withAlpha(60)
+        : (isPast
+              ? (task.isCompleted
+                    ? Colors.green.withAlpha(40)
+                    : colorScheme.outlineVariant.withAlpha(40))
+              : colorScheme.primary.withAlpha(40));
 
     return GestureDetector(
       onTap: () {
@@ -1785,23 +1803,28 @@ class _TimelineCard extends StatelessWidget {
       child: Container(
         padding: const EdgeInsets.all(10),
         decoration: BoxDecoration(
-          color: isPast
-              ? (task.isCompleted
-                    ? Colors.green.withAlpha(10)
-                    : colorScheme.surfaceContainerHighest.withAlpha(30))
-              : colorScheme.primaryContainer.withAlpha(40),
+          color: cardColor,
           borderRadius: BorderRadius.circular(10),
-          border: Border.all(
-            color: isPast
-                ? (task.isCompleted
-                      ? Colors.green.withAlpha(40)
-                      : colorScheme.outlineVariant.withAlpha(40))
-                : colorScheme.primary.withAlpha(40),
-          ),
+          border: Border.all(color: borderColor),
         ),
         child: Row(
           children: [
-            if (task.isCompleted)
+            // Subscription reminder indicator
+            if (isSubscriptionTask)
+              Container(
+                padding: const EdgeInsets.all(4),
+                margin: const EdgeInsets.only(right: 8),
+                decoration: BoxDecoration(
+                  color: Colors.orange.withAlpha(40),
+                  borderRadius: BorderRadius.circular(6),
+                ),
+                child: const Icon(
+                  Icons.notifications_active,
+                  size: 14,
+                  color: Colors.deepOrange,
+                ),
+              ),
+            if (task.isCompleted && !isSubscriptionTask)
               Container(
                 padding: const EdgeInsets.all(2),
                 margin: const EdgeInsets.only(right: 6),
@@ -1819,7 +1842,11 @@ class _TimelineCard extends StatelessWidget {
                   decoration: task.isCompleted
                       ? TextDecoration.lineThrough
                       : null,
-                  color: isPast ? colorScheme.outline : null,
+                  color: isPast
+                      ? colorScheme.outline
+                      : (isSubscriptionTask
+                            ? Colors.deepOrange.shade700
+                            : null),
                   fontSize: 13,
                 ),
               ),
@@ -1827,7 +1854,7 @@ class _TimelineCard extends StatelessWidget {
             Text(
               '${task.durationMinutes}m',
               style: theme.textTheme.labelSmall?.copyWith(
-                color: colorScheme.outline,
+                color: isSubscriptionTask ? Colors.orange : colorScheme.outline,
                 fontSize: 10,
               ),
             ),

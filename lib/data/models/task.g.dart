@@ -72,8 +72,18 @@ const TaskSchema = CollectionSchema(
       name: r'isFixed',
       type: IsarType.bool,
     ),
-    r'title': PropertySchema(
+    r'isSubscriptionReminder': PropertySchema(
       id: 11,
+      name: r'isSubscriptionReminder',
+      type: IsarType.bool,
+    ),
+    r'subscriptionId': PropertySchema(
+      id: 12,
+      name: r'subscriptionId',
+      type: IsarType.long,
+    ),
+    r'title': PropertySchema(
+      id: 13,
       name: r'title',
       type: IsarType.string,
     )
@@ -143,7 +153,9 @@ void _taskSerialize(
   writer.writeBool(offsets[8], object.isCompleted);
   writer.writeBool(offsets[9], object.isDraft);
   writer.writeBool(offsets[10], object.isFixed);
-  writer.writeString(offsets[11], object.title);
+  writer.writeBool(offsets[11], object.isSubscriptionReminder);
+  writer.writeLong(offsets[12], object.subscriptionId);
+  writer.writeString(offsets[13], object.title);
 }
 
 Task _taskDeserialize(
@@ -164,7 +176,9 @@ Task _taskDeserialize(
   object.isCompleted = reader.readBool(offsets[8]);
   object.isDraft = reader.readBool(offsets[9]);
   object.isFixed = reader.readBool(offsets[10]);
-  object.title = reader.readString(offsets[11]);
+  object.isSubscriptionReminder = reader.readBool(offsets[11]);
+  object.subscriptionId = reader.readLongOrNull(offsets[12]);
+  object.title = reader.readString(offsets[13]);
   return object;
 }
 
@@ -198,6 +212,10 @@ P _taskDeserializeProp<P>(
     case 10:
       return (reader.readBool(offset)) as P;
     case 11:
+      return (reader.readBool(offset)) as P;
+    case 12:
+      return (reader.readLongOrNull(offset)) as P;
+    case 13:
       return (reader.readString(offset)) as P;
     default:
       throw IsarError('Unknown property with id $propertyId');
@@ -1218,6 +1236,85 @@ extension TaskQueryFilter on QueryBuilder<Task, Task, QFilterCondition> {
     });
   }
 
+  QueryBuilder<Task, Task, QAfterFilterCondition> isSubscriptionReminderEqualTo(
+      bool value) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(FilterCondition.equalTo(
+        property: r'isSubscriptionReminder',
+        value: value,
+      ));
+    });
+  }
+
+  QueryBuilder<Task, Task, QAfterFilterCondition> subscriptionIdIsNull() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(const FilterCondition.isNull(
+        property: r'subscriptionId',
+      ));
+    });
+  }
+
+  QueryBuilder<Task, Task, QAfterFilterCondition> subscriptionIdIsNotNull() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(const FilterCondition.isNotNull(
+        property: r'subscriptionId',
+      ));
+    });
+  }
+
+  QueryBuilder<Task, Task, QAfterFilterCondition> subscriptionIdEqualTo(
+      int? value) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(FilterCondition.equalTo(
+        property: r'subscriptionId',
+        value: value,
+      ));
+    });
+  }
+
+  QueryBuilder<Task, Task, QAfterFilterCondition> subscriptionIdGreaterThan(
+    int? value, {
+    bool include = false,
+  }) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(FilterCondition.greaterThan(
+        include: include,
+        property: r'subscriptionId',
+        value: value,
+      ));
+    });
+  }
+
+  QueryBuilder<Task, Task, QAfterFilterCondition> subscriptionIdLessThan(
+    int? value, {
+    bool include = false,
+  }) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(FilterCondition.lessThan(
+        include: include,
+        property: r'subscriptionId',
+        value: value,
+      ));
+    });
+  }
+
+  QueryBuilder<Task, Task, QAfterFilterCondition> subscriptionIdBetween(
+    int? lower,
+    int? upper, {
+    bool includeLower = true,
+    bool includeUpper = true,
+  }) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(FilterCondition.between(
+        property: r'subscriptionId',
+        lower: lower,
+        includeLower: includeLower,
+        upper: upper,
+        includeUpper: includeUpper,
+      ));
+    });
+  }
+
   QueryBuilder<Task, Task, QAfterFilterCondition> titleEqualTo(
     String value, {
     bool caseSensitive = true,
@@ -1484,6 +1581,30 @@ extension TaskQuerySortBy on QueryBuilder<Task, Task, QSortBy> {
     });
   }
 
+  QueryBuilder<Task, Task, QAfterSortBy> sortByIsSubscriptionReminder() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addSortBy(r'isSubscriptionReminder', Sort.asc);
+    });
+  }
+
+  QueryBuilder<Task, Task, QAfterSortBy> sortByIsSubscriptionReminderDesc() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addSortBy(r'isSubscriptionReminder', Sort.desc);
+    });
+  }
+
+  QueryBuilder<Task, Task, QAfterSortBy> sortBySubscriptionId() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addSortBy(r'subscriptionId', Sort.asc);
+    });
+  }
+
+  QueryBuilder<Task, Task, QAfterSortBy> sortBySubscriptionIdDesc() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addSortBy(r'subscriptionId', Sort.desc);
+    });
+  }
+
   QueryBuilder<Task, Task, QAfterSortBy> sortByTitle() {
     return QueryBuilder.apply(this, (query) {
       return query.addSortBy(r'title', Sort.asc);
@@ -1642,6 +1763,30 @@ extension TaskQuerySortThenBy on QueryBuilder<Task, Task, QSortThenBy> {
     });
   }
 
+  QueryBuilder<Task, Task, QAfterSortBy> thenByIsSubscriptionReminder() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addSortBy(r'isSubscriptionReminder', Sort.asc);
+    });
+  }
+
+  QueryBuilder<Task, Task, QAfterSortBy> thenByIsSubscriptionReminderDesc() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addSortBy(r'isSubscriptionReminder', Sort.desc);
+    });
+  }
+
+  QueryBuilder<Task, Task, QAfterSortBy> thenBySubscriptionId() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addSortBy(r'subscriptionId', Sort.asc);
+    });
+  }
+
+  QueryBuilder<Task, Task, QAfterSortBy> thenBySubscriptionIdDesc() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addSortBy(r'subscriptionId', Sort.desc);
+    });
+  }
+
   QueryBuilder<Task, Task, QAfterSortBy> thenByTitle() {
     return QueryBuilder.apply(this, (query) {
       return query.addSortBy(r'title', Sort.asc);
@@ -1728,6 +1873,18 @@ extension TaskQueryWhereDistinct on QueryBuilder<Task, Task, QDistinct> {
     });
   }
 
+  QueryBuilder<Task, Task, QDistinct> distinctByIsSubscriptionReminder() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addDistinctBy(r'isSubscriptionReminder');
+    });
+  }
+
+  QueryBuilder<Task, Task, QDistinct> distinctBySubscriptionId() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addDistinctBy(r'subscriptionId');
+    });
+  }
+
   QueryBuilder<Task, Task, QDistinct> distinctByTitle(
       {bool caseSensitive = true}) {
     return QueryBuilder.apply(this, (query) {
@@ -1806,6 +1963,18 @@ extension TaskQueryProperty on QueryBuilder<Task, Task, QQueryProperty> {
   QueryBuilder<Task, bool, QQueryOperations> isFixedProperty() {
     return QueryBuilder.apply(this, (query) {
       return query.addPropertyName(r'isFixed');
+    });
+  }
+
+  QueryBuilder<Task, bool, QQueryOperations> isSubscriptionReminderProperty() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addPropertyName(r'isSubscriptionReminder');
+    });
+  }
+
+  QueryBuilder<Task, int?, QQueryOperations> subscriptionIdProperty() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addPropertyName(r'subscriptionId');
     });
   }
 

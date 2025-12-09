@@ -27,6 +27,11 @@ class Task {
   // Task description/notes
   String? description;
 
+  // Subscription reminder fields
+  bool isSubscriptionReminder =
+      false; // True if auto-generated from subscription
+  int? subscriptionId; // Link back to the source subscription
+
   // Completion details (optional)
   String? completionNote;
   String? completionPhotoPath;
@@ -49,6 +54,8 @@ class Task {
     bool? isDraft,
     String? category,
     String? description,
+    bool? isSubscriptionReminder,
+    int? subscriptionId,
     String? completionNote,
     String? completionPhotoPath,
     DateTime? completedAt,
@@ -63,6 +70,9 @@ class Task {
       ..isDraft = isDraft ?? this.isDraft
       ..category = category ?? this.category
       ..description = description ?? this.description
+      ..isSubscriptionReminder =
+          isSubscriptionReminder ?? this.isSubscriptionReminder
+      ..subscriptionId = subscriptionId ?? this.subscriptionId
       ..completionNote = completionNote ?? this.completionNote
       ..completionPhotoPath = completionPhotoPath ?? this.completionPhotoPath
       ..completedAt = completedAt ?? this.completedAt;

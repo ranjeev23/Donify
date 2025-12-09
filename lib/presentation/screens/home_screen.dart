@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:remindlyf/domain/providers/task_provider.dart';
 import 'package:remindlyf/data/models/task.dart';
-import 'package:remindlyf/presentation/screens/statistics_screen.dart';
+import 'package:remindlyf/presentation/screens/subscriptions_screen.dart';
 import 'package:intl/intl.dart';
 import 'package:gap/gap.dart';
 import 'package:table_calendar/table_calendar.dart';
@@ -44,15 +44,21 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
           icon: Container(
             padding: const EdgeInsets.all(8),
             decoration: BoxDecoration(
-              color: colorScheme.primaryContainer.withAlpha(100),
+              color: Colors.orange.withAlpha(40),
               borderRadius: BorderRadius.circular(10),
             ),
-            child: const Icon(Icons.bar_chart, size: 20),
+            child: const Icon(
+              Icons.notifications_active,
+              size: 20,
+              color: Colors.orange,
+            ),
           ),
           onPressed: () {
             Navigator.push(
               context,
-              MaterialPageRoute(builder: (context) => const StatisticsScreen()),
+              MaterialPageRoute(
+                builder: (context) => const SubscriptionsScreen(),
+              ),
             );
           },
         ),
