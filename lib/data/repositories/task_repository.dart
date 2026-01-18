@@ -1,16 +1,28 @@
 import 'package:isar/isar.dart';
+import 'package:flutter/foundation.dart';
 import 'package:path_provider/path_provider.dart';
+import 'dart:io';
+import 'dart:async';
 import 'package:remindlyf/data/models/task.dart';
 import 'package:remindlyf/data/models/user_preferences.dart';
 import 'package:remindlyf/data/models/subscription.dart';
 import 'package:remindlyf/data/models/subscription_category.dart';
+import 'package:remindlyf/data/models/expense.dart';
+import 'package:remindlyf/data/models/expense_category.dart';
+import 'package:remindlyf/data/models/income.dart';
 import 'package:remindlyf/core/services/notification_service.dart';
 
 class TaskRepository {
+  static final TaskRepository _instance = TaskRepository._internal();
   late Future<Isar> db;
 
-  TaskRepository() {
+  factory TaskRepository() {
+    return _instance;
+  }
+
+  TaskRepository._internal() {
     db = openDB();
+    _initWatchers();
   }
 
   Future<Isar> openDB() async {
@@ -23,6 +35,9 @@ class TaskRepository {
           UserPreferencesSchema,
           SubscriptionSchema,
           SubscriptionCategorySchema,
+          ExpenseSchema,
+          ExpenseCategorySchema,
+          IncomeSchema,
         ],
         directory: dir.path,
         inspector: !isRelease,
@@ -46,6 +61,7 @@ class TaskRepository {
         scheduledDate: task.dueDate!,
       );
     }
+    _triggerAutoBackup();
   }
 
   Future<void> updateTask(Task task) async {
@@ -63,6 +79,7 @@ class TaskRepository {
     } else {
       await NotificationService().cancelNotification(task.id);
     }
+    _triggerAutoBackup();
   }
 
   Future<void> deleteTask(Id id) async {
@@ -71,6 +88,7 @@ class TaskRepository {
       await isar.tasks.delete(id);
     });
     await NotificationService().cancelNotification(id);
+    _triggerAutoBackup();
   }
 
   Future<List<Task>> getAllTasks() async {
@@ -103,6 +121,7 @@ class TaskRepository {
         }
       }
     });
+    _triggerAutoBackup();
   }
 
   // ==================== USER PREFERENCES METHODS ====================
@@ -125,6 +144,7 @@ class TaskRepository {
     await isar.writeTxn(() async {
       await isar.userPreferences.put(prefs);
     });
+    _triggerAutoBackup();
   }
 
   Stream<UserPreferences?> watchPreferences() async* {
@@ -149,6 +169,7 @@ class TaskRepository {
     await isar.writeTxn(() async {
       await isar.subscriptionCategorys.put(category);
     });
+    _triggerAutoBackup();
   }
 
   Future<void> updateCategory(SubscriptionCategory category) async {
@@ -156,6 +177,7 @@ class TaskRepository {
     await isar.writeTxn(() async {
       await isar.subscriptionCategorys.put(category);
     });
+    _triggerAutoBackup();
   }
 
   Future<void> deleteCategory(Id id) async {
@@ -163,6 +185,7 @@ class TaskRepository {
     await isar.writeTxn(() async {
       await isar.subscriptionCategorys.delete(id);
     });
+    _triggerAutoBackup();
   }
 
   Stream<List<SubscriptionCategory>> watchCategories() async* {
@@ -235,44 +258,65 @@ class TaskRepository {
 
     // Create the reminder task
     await _createOrUpdateReminderTask(subscription);
+    _triggerAutoBackup();
   }
 
-  /// Update a subscription and its reminder task
+  /// Update a subscription and its reminder task(s)
   Future<void> updateSubscription(Subscription subscription) async {
     final isar = await db;
 
-    // Delete old reminder task if exists
-    if (subscription.linkedTaskId != null) {
+    // Delete all old reminder tasks if they exist
+    for (final taskId in subscription.linkedTaskIds) {
+      await deleteTask(taskId);
+    }
+    // Also check the deprecated linkedTaskId for backwards compatibility
+    if (subscription.linkedTaskId != null &&
+        !subscription.linkedTaskIds.contains(subscription.linkedTaskId)) {
       await deleteTask(subscription.linkedTaskId!);
     }
+
+    // Clear the task IDs
+    subscription.linkedTaskIds = [];
+    subscription.linkedTaskId = null;
 
     // Update the subscription
     await isar.writeTxn(() async {
       await isar.subscriptions.put(subscription);
     });
 
-    // Create new reminder task if subscription is active
+    // Create new reminder task(s) if subscription is active
     if (subscription.isActive) {
       await _createOrUpdateReminderTask(subscription);
     }
+    _triggerAutoBackup();
   }
 
-  /// Delete a subscription and its linked reminder task
+  /// Delete a subscription and ALL its linked reminder tasks (cascade delete)
   Future<void> deleteSubscription(Id id) async {
     final isar = await db;
 
-    // Get the subscription to find linked task
+    // Get the subscription to find all linked tasks
     final subscription = await isar.subscriptions.get(id);
-    if (subscription?.linkedTaskId != null) {
-      await deleteTask(subscription!.linkedTaskId!);
+    if (subscription != null) {
+      // Delete all linked tasks (cascade delete)
+      for (final taskId in subscription.linkedTaskIds) {
+        await deleteTask(taskId);
+      }
+      // Also check backwards compatible linkedTaskId
+      if (subscription.linkedTaskId != null &&
+          !subscription.linkedTaskIds.contains(subscription.linkedTaskId)) {
+        await deleteTask(subscription.linkedTaskId!);
+      }
     }
 
     await isar.writeTxn(() async {
       await isar.subscriptions.delete(id);
     });
+    _triggerAutoBackup();
   }
 
-  /// Create or update the reminder task for a subscription
+  /// Create or update the reminder task(s) for a subscription
+  /// For recurring subscriptions, creates multiple tasks for all occurrences
   Future<void> _createOrUpdateReminderTask(Subscription subscription) async {
     final isar = await db;
 
@@ -280,71 +324,152 @@ class TaskRepository {
     final category = await getCategory(subscription.categoryId);
     final categoryName = category?.name ?? 'Reminder';
 
-    // Calculate reminder date (1 day before expiry by default)
-    final reminderDate = subscription.reminderDate;
-
     // Get user preferences for wake up time
     final prefs = await getPreferences();
     final wakeUpHour = prefs.wakeUpHour;
     final wakeUpMinute = prefs.wakeUpMinute;
 
-    // Get all tasks for that day to find next available slot
-    final allTasks = await getAllTasks();
-    final dayTasks = allTasks.where((t) {
-      if (t.dueDate == null || t.isDraft) return false;
-      return t.dueDate!.year == reminderDate.year &&
-          t.dueDate!.month == reminderDate.month &&
-          t.dueDate!.day == reminderDate.day;
-    }).toList();
+    // Calculate all reminder dates based on recurrence type
+    final List<DateTime> reminderDates = _calculateReminderDates(subscription);
+    final List<int> createdTaskIds = [];
 
-    // Sort by start time
-    dayTasks.sort((a, b) => a.dueDate!.compareTo(b.dueDate!));
+    for (final reminderDate in reminderDates) {
+      // Skip past dates
+      final now = DateTime.now();
+      final today = DateTime(now.year, now.month, now.day);
+      final reminderDay = DateTime(
+        reminderDate.year,
+        reminderDate.month,
+        reminderDate.day,
+      );
+      if (reminderDay.isBefore(today)) continue;
 
-    // Find next available time slot (start from wake up time)
-    DateTime scheduledTime = DateTime(
-      reminderDate.year,
-      reminderDate.month,
-      reminderDate.day,
-      wakeUpHour,
-      wakeUpMinute,
-    );
+      // Get all tasks for that day to find next available slot
+      final allTasks = await getAllTasks();
+      final dayTasks = allTasks.where((t) {
+        if (t.dueDate == null || t.isDraft) return false;
+        return t.dueDate!.year == reminderDate.year &&
+            t.dueDate!.month == reminderDate.month &&
+            t.dueDate!.day == reminderDate.day;
+      }).toList();
 
-    // Find a gap or schedule after the last task
-    for (final task in dayTasks) {
-      final taskStart = task.dueDate!;
-      final taskEnd = task.endTime!;
+      // Sort by start time
+      dayTasks.sort((a, b) => a.dueDate!.compareTo(b.dueDate!));
 
-      if (scheduledTime.add(const Duration(minutes: 30)).isBefore(taskStart) ||
-          scheduledTime
-              .add(const Duration(minutes: 30))
-              .isAtSameMomentAs(taskStart)) {
-        // Found a gap before this task
-        break;
+      // Find next available time slot (start from wake up time)
+      DateTime scheduledTime = DateTime(
+        reminderDate.year,
+        reminderDate.month,
+        reminderDate.day,
+        wakeUpHour,
+        wakeUpMinute,
+      );
+
+      // Find a gap or schedule after the last task
+      for (final task in dayTasks) {
+        final taskStart = task.dueDate!;
+        final taskEnd = task.endTime!;
+
+        if (scheduledTime
+                .add(const Duration(minutes: 30))
+                .isBefore(taskStart) ||
+            scheduledTime
+                .add(const Duration(minutes: 30))
+                .isAtSameMomentAs(taskStart)) {
+          // Found a gap before this task
+          break;
+        }
+
+        // Move scheduled time to after this task
+        if (taskEnd.isAfter(scheduledTime)) {
+          scheduledTime = taskEnd;
+        }
       }
 
-      // Move scheduled time to after this task
-      if (taskEnd.isAfter(scheduledTime)) {
-        scheduledTime = taskEnd;
-      }
+      // Create the task
+      final task = Task()
+        ..title = '⚠️ $categoryName: ${subscription.name} expiring tomorrow'
+        ..dueDate = scheduledTime
+        ..durationMinutes = 30
+        ..isSubscriptionReminder = true
+        ..subscriptionId = subscription.id
+        ..description = subscription.description
+        ..category = 'subscription';
+
+      await addTask(task);
+      createdTaskIds.add(task.id);
     }
 
-    // Create the task
-    final task = Task()
-      ..title = '⚠️ $categoryName: ${subscription.name} expiring tomorrow'
-      ..dueDate = scheduledTime
-      ..durationMinutes = 30
-      ..isSubscriptionReminder = true
-      ..subscriptionId = subscription.id
-      ..description = subscription.description
-      ..category = 'subscription';
-
-    await addTask(task);
-
-    // Link the task back to the subscription
-    subscription.linkedTaskId = task.id;
+    // Link all tasks back to the subscription
+    subscription.linkedTaskIds = createdTaskIds;
+    if (createdTaskIds.isNotEmpty) {
+      subscription.linkedTaskId =
+          createdTaskIds.first; // Keep backwards compatibility
+    }
     await isar.writeTxn(() async {
       await isar.subscriptions.put(subscription);
     });
+  }
+
+  /// Calculate all reminder dates based on recurrence type
+  List<DateTime> _calculateReminderDates(Subscription subscription) {
+    final List<DateTime> dates = [];
+    final baseExpiryDate = subscription.expiryDate;
+
+    // No reminders for document-only items (no expiry date)
+    if (baseExpiryDate == null) {
+      return dates;
+    }
+
+    final reminderDays = subscription.reminderDays;
+
+    switch (subscription.recurrenceType) {
+      case RecurrenceType.once:
+        // Single reminder
+        dates.add(baseExpiryDate.subtract(Duration(days: reminderDays)));
+        break;
+
+      case RecurrenceType.monthly:
+        // Create reminders for 12 months
+        for (int i = 0; i < 12; i++) {
+          final expiryDate = DateTime(
+            baseExpiryDate.year,
+            baseExpiryDate.month + i,
+            baseExpiryDate.day,
+            baseExpiryDate.hour,
+            baseExpiryDate.minute,
+          );
+          dates.add(expiryDate.subtract(Duration(days: reminderDays)));
+        }
+        break;
+
+      case RecurrenceType.yearly:
+        // Create reminder for next year
+        dates.add(baseExpiryDate.subtract(Duration(days: reminderDays)));
+        final nextYearExpiry = DateTime(
+          baseExpiryDate.year + 1,
+          baseExpiryDate.month,
+          baseExpiryDate.day,
+          baseExpiryDate.hour,
+          baseExpiryDate.minute,
+        );
+        dates.add(nextYearExpiry.subtract(Duration(days: reminderDays)));
+        break;
+
+      case RecurrenceType.custom:
+        // Create reminders based on custom interval for up to 1 year
+        final intervalDays = subscription.customIntervalDays;
+        DateTime currentExpiry = baseExpiryDate;
+        final oneYearFromNow = DateTime.now().add(const Duration(days: 365));
+
+        while (currentExpiry.isBefore(oneYearFromNow)) {
+          dates.add(currentExpiry.subtract(Duration(days: reminderDays)));
+          currentExpiry = currentExpiry.add(Duration(days: intervalDays));
+        }
+        break;
+    }
+
+    return dates;
   }
 
   /// Mark subscription as completed/renewed
@@ -370,6 +495,374 @@ class TaskRepository {
       await isar.writeTxn(() async {
         await isar.subscriptions.put(subscription);
       });
+    }
+  }
+
+  // ==================== EXPENSE CATEGORY METHODS ====================
+
+  Future<List<ExpenseCategory>> getAllExpenseCategories() async {
+    final isar = await db;
+    return await isar.expenseCategorys.where().findAll();
+  }
+
+  Future<List<ExpenseCategory>> getExpenseCategoriesByType(
+    ExpenseType type,
+  ) async {
+    final isar = await db;
+    return await isar.expenseCategorys
+        .where()
+        .filter()
+        .typeEqualTo(type)
+        .and()
+        .isActiveEqualTo(true)
+        .findAll();
+  }
+
+  Future<ExpenseCategory?> getExpenseCategory(Id id) async {
+    final isar = await db;
+    return await isar.expenseCategorys.get(id);
+  }
+
+  Future<void> addExpenseCategory(ExpenseCategory category) async {
+    final isar = await db;
+    await isar.writeTxn(() async {
+      await isar.expenseCategorys.put(category);
+    });
+    _triggerAutoBackup();
+  }
+
+  Future<void> updateExpenseCategory(ExpenseCategory category) async {
+    final isar = await db;
+    await isar.writeTxn(() async {
+      await isar.expenseCategorys.put(category);
+    });
+    _triggerAutoBackup();
+  }
+
+  Future<void> deleteExpenseCategory(Id id) async {
+    final isar = await db;
+    await isar.writeTxn(() async {
+      await isar.expenseCategorys.delete(id);
+    });
+    _triggerAutoBackup();
+  }
+
+  Stream<List<ExpenseCategory>> watchExpenseCategories() async* {
+    final isar = await db;
+    yield* isar.expenseCategorys.where().watch(fireImmediately: true);
+  }
+
+  // ==================== EXPENSE METHODS ====================
+
+  Future<List<Expense>> getAllExpenses() async {
+    final isar = await db;
+    return await isar.expenses.where().sortByExpenseDateDesc().findAll();
+  }
+
+  Future<Expense?> getExpense(Id id) async {
+    final isar = await db;
+    return await isar.expenses.get(id);
+  }
+
+  Future<List<Expense>> getExpensesByCategory(int categoryId) async {
+    final isar = await db;
+    return await isar.expenses
+        .where()
+        .filter()
+        .categoryIdEqualTo(categoryId)
+        .sortByExpenseDateDesc()
+        .findAll();
+  }
+
+  Future<List<Expense>> getExpensesByTask(int taskId) async {
+    final isar = await db;
+    return await isar.expenses.where().filter().taskIdEqualTo(taskId).findAll();
+  }
+
+  Future<List<Expense>> getExpensesByDateRange(
+    DateTime start,
+    DateTime end,
+  ) async {
+    final isar = await db;
+    return await isar.expenses
+        .where()
+        .filter()
+        .expenseDateBetween(start, end)
+        .sortByExpenseDateDesc()
+        .findAll();
+  }
+
+  Future<void> addExpense(Expense expense) async {
+    final isar = await db;
+    await isar.writeTxn(() async {
+      await isar.expenses.put(expense);
+    });
+    _triggerAutoBackup();
+  }
+
+  Future<void> updateExpense(Expense expense) async {
+    final isar = await db;
+    await isar.writeTxn(() async {
+      await isar.expenses.put(expense);
+    });
+    _triggerAutoBackup();
+  }
+
+  Future<void> deleteExpense(Id id) async {
+    final isar = await db;
+    await isar.writeTxn(() async {
+      await isar.expenses.delete(id);
+    });
+    _triggerAutoBackup();
+  }
+
+  Stream<List<Expense>> watchExpenses() async* {
+    final isar = await db;
+    yield* isar.expenses.where().sortByExpenseDateDesc().watch(
+      fireImmediately: true,
+    );
+  }
+
+  // Get total expenses for a specific month
+  Future<double> getMonthlyTotal(int year, int month) async {
+    final startOfMonth = DateTime(year, month, 1);
+    final endOfMonth = DateTime(year, month + 1, 0, 23, 59, 59);
+    final expenses = await getExpensesByDateRange(startOfMonth, endOfMonth);
+    return expenses.fold<double>(0.0, (sum, e) => sum + e.amount);
+  }
+
+  // Get expenses grouped by type for a date range
+  Future<Map<ExpenseType, double>> getExpensesByType(
+    DateTime start,
+    DateTime end,
+  ) async {
+    final expenses = await getExpensesByDateRange(start, end);
+    final categories = await getAllExpenseCategories();
+
+    final Map<ExpenseType, double> result = {
+      ExpenseType.needs: 0,
+      ExpenseType.wants: 0,
+      ExpenseType.savings: 0,
+    };
+
+    for (final expense in expenses) {
+      if (expense.categoryId != null) {
+        final category = categories.firstWhere(
+          (c) => c.id == expense.categoryId,
+          orElse: () => ExpenseCategory()..type = ExpenseType.needs,
+        );
+        result[category.type] = result[category.type]! + expense.amount;
+      }
+    }
+
+    return result;
+  }
+
+  // ==================== INCOME METHODS ====================
+
+  Future<List<Income>> getAllIncomes() async {
+    final isar = await db;
+    return await isar.incomes.where().sortByIncomeDateDesc().findAll();
+  }
+
+  Future<void> addIncome(Income income) async {
+    final isar = await db;
+    await isar.writeTxn(() async {
+      await isar.incomes.put(income);
+    });
+    _triggerAutoBackup();
+  }
+
+  Future<void> updateIncome(Income income) async {
+    final isar = await db;
+    await isar.writeTxn(() async {
+      await isar.incomes.put(income);
+    });
+    _triggerAutoBackup();
+  }
+
+  Future<void> deleteIncome(Id id) async {
+    final isar = await db;
+    await isar.writeTxn(() async {
+      await isar.incomes.delete(id);
+    });
+    _triggerAutoBackup();
+  }
+
+  Stream<List<Income>> watchIncomes() async* {
+    final isar = await db;
+    yield* isar.incomes.where().sortByIncomeDateDesc().watch(
+      fireImmediately: true,
+    );
+  }
+
+  Future<List<Income>> getIncomesByDateRange(
+    DateTime start,
+    DateTime end,
+  ) async {
+    final isar = await db;
+    return await isar.incomes
+        .where()
+        .filter()
+        .incomeDateBetween(start, end)
+        .sortByIncomeDateDesc()
+        .findAll();
+  }
+
+  Future<double> getMonthlyIncomeTotal(int year, int month) async {
+    final startOfMonth = DateTime(year, month, 1);
+    final endOfMonth = DateTime(year, month + 1, 0, 23, 59, 59);
+    final incomes = await getIncomesByDateRange(startOfMonth, endOfMonth);
+    return incomes.fold<double>(0.0, (sum, i) => sum + i.amount);
+  }
+  // ==================== BACKUP METHODS ====================
+
+  Future<void> createBackup(String path) async {
+    final isar = await db;
+    final file = File(path);
+    if (await file.exists()) {
+      await file.delete();
+    }
+    await isar.copyToFile(path);
+    print('Backup created successfully at: $path');
+  }
+
+  Future<void> restoreBackup(File backupFile) async {
+    final isar = await db;
+    await isar.close(); // Close the current instance
+
+    final dir = await getApplicationDocumentsDirectory();
+    final dbPath = '${dir.path}/default.isar';
+    final dbFile = File(dbPath);
+
+    // Overwrite the current DB with the backup
+    if (await dbFile.exists()) {
+      await dbFile.delete();
+    }
+    await backupFile.copy(dbPath);
+
+    // Re-open the DB
+    db = openDB();
+    _initWatchers(); // Re-init watchers after restore
+  }
+
+  // ==================== AUTO-BACKUP LOGIC ====================
+
+  Timer? _backupTimer;
+  final ValueNotifier<DateTime?> lastBackupTime = ValueNotifier(null);
+
+  void _initWatchers() async {
+    final isar = await db;
+
+    // Listen to all collections
+    isar.tasks.watchLazy().listen((_) => _triggerAutoBackup());
+    isar.userPreferences.watchLazy().listen((_) => _triggerAutoBackup());
+    isar.subscriptions.watchLazy().listen((_) => _triggerAutoBackup());
+    isar.subscriptionCategorys.watchLazy().listen((_) => _triggerAutoBackup());
+    isar.expenses.watchLazy().listen((_) => _triggerAutoBackup());
+    isar.expenseCategorys.watchLazy().listen((_) => _triggerAutoBackup());
+    isar.incomes.watchLazy().listen((_) => _triggerAutoBackup());
+  }
+
+  Future<void> _performBackup() async {
+    try {
+      print('Starting backup process...');
+      final dir = await getApplicationDocumentsDirectory();
+      final backupDir = Directory('${dir.path}/Backups');
+      if (!await backupDir.exists()) {
+        await backupDir.create(recursive: true);
+      }
+
+      final backupPath = '${backupDir.path}/latest_backup.isar';
+      await createBackup(backupPath);
+
+      // Attempt to copy to public Downloads folder on Android for persistence
+      if (Platform.isAndroid) {
+        try {
+          final externalDir = Directory(
+            '/storage/emulated/0/Download/RemindlyBackups',
+          );
+          if (!await externalDir.exists()) {
+            await externalDir.create(recursive: true);
+          }
+          final externalPath = '${externalDir.path}/latest_backup.isar';
+          final externalFile = File(externalPath);
+          if (await externalFile.exists()) {
+            await externalFile.delete();
+          }
+          await File(backupPath).copy(externalPath);
+          print('External backup created at: $externalPath');
+        } catch (e) {
+          print('External backup failed (permission issue?): $e');
+        }
+      }
+
+      final now = DateTime.now();
+      lastBackupTime.value = now;
+      print('Backup completed successfully: $backupPath at $now');
+    } catch (e) {
+      print('Backup failed: $e');
+      rethrow;
+    }
+  }
+
+  Future<void> forceBackupNow() async {
+    print('Forcing manual backup...');
+    _backupTimer?.cancel();
+    await _performBackup();
+  }
+
+  void _triggerAutoBackup() {
+    print('Auto-backup triggered (debouncing...)');
+    // Debounce: Cancel previous timer and start a new one
+    _backupTimer?.cancel();
+    _backupTimer = Timer(const Duration(seconds: 1), () async {
+      await _performBackup();
+    });
+  }
+
+  Future<Map<String, List<dynamic>>> inspectBackup(File backupFile) async {
+    final dir = await getTemporaryDirectory();
+    final timestamp = DateTime.now().millisecondsSinceEpoch;
+    final inspectDir = Directory('${dir.path}/inspector_$timestamp');
+    await inspectDir.create(recursive: true);
+
+    try {
+      final instanceName = 'inspector_$timestamp';
+      final dbPath = '${inspectDir.path}/$instanceName.isar';
+      await backupFile.copy(dbPath);
+
+      final isar = await Isar.open(
+        [
+          TaskSchema,
+          UserPreferencesSchema,
+          SubscriptionSchema,
+          SubscriptionCategorySchema,
+          ExpenseSchema,
+          ExpenseCategorySchema,
+          IncomeSchema,
+        ],
+        directory: inspectDir.path,
+        name: instanceName,
+      );
+
+      final tasks = await isar.tasks.where().findAll();
+      final expenses = await isar.expenses.where().findAll();
+      final subscriptions = await isar.subscriptions.where().findAll();
+      final incomes = await isar.incomes.where().findAll();
+
+      await isar.close();
+
+      return {
+        'Tasks': tasks,
+        'Expenses': expenses,
+        'Subscriptions': subscriptions,
+        'Incomes': incomes,
+      };
+    } finally {
+      if (await inspectDir.exists()) {
+        await inspectDir.delete(recursive: true);
+      }
     }
   }
 }

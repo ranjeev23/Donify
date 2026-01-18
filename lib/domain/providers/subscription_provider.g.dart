@@ -58,7 +58,7 @@ final subscriptionsByCategoryProvider = AutoDisposeStreamProvider<
 
 typedef SubscriptionsByCategoryRef = AutoDisposeStreamProviderRef<
     Map<SubscriptionCategory, List<Subscription>>>;
-String _$upcomingExpiriesHash() => r'6c4b74a15489bf7a0724fbcf79bc0adc1a57f8cc';
+String _$upcomingExpiriesHash() => r'250f67766b7ce9ec7caef8d080469c9b75f34d7b';
 
 /// Copied from Dart SDK
 class _SystemHash {
@@ -209,7 +209,7 @@ class _UpcomingExpiriesProviderElement
   int get days => (origin as UpcomingExpiriesProvider).days;
 }
 
-String _$expiringTodayHash() => r'813d423b0b21b468c33f83d7c3081b0c5a6afcfe';
+String _$expiringTodayHash() => r'38b34fed3c336daa5dd8578c0e1b7a97bef80904';
 
 /// See also [expiringToday].
 @ProviderFor(expiringToday)

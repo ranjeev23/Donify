@@ -1,8 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:remindlyf/data/models/task.dart';
+import 'package:remindlyf/data/models/expense.dart';
+import 'package:remindlyf/data/models/expense_category.dart';
 import 'package:remindlyf/domain/providers/task_provider.dart';
 import 'package:remindlyf/core/services/scheduling_service.dart';
+import 'package:remindlyf/presentation/widgets/add_expense_sheet.dart';
 import 'package:gap/gap.dart';
 import 'package:intl/intl.dart';
 
@@ -305,6 +308,13 @@ class _TaskDetailSheetState extends ConsumerState<TaskDetailSheet> {
                     ),
                   ),
                 ),
+              const Gap(14),
+
+              // Expense Section (Collapsible)
+              _ExpenseSection(
+                task: widget.task,
+                selectedDate: widget.selectedDate,
+              ),
               const Gap(14),
 
               // Mark as Complete/Incomplete button
@@ -927,5 +937,314 @@ class _TaskDetailSheetState extends ConsumerState<TaskDetailSheet> {
       return m > 0 ? '${h}h ${m}m' : '${h}h';
     }
     return '${minutes}m';
+  }
+}
+
+// Expense Section Widget for Task Detail
+class _ExpenseSection extends ConsumerStatefulWidget {
+  final Task task;
+  final DateTime selectedDate;
+
+  const _ExpenseSection({required this.task, required this.selectedDate});
+
+  @override
+  ConsumerState<_ExpenseSection> createState() => _ExpenseSectionState();
+}
+
+class _ExpenseSectionState extends ConsumerState<_ExpenseSection> {
+  bool _isExpanded = false;
+  List<Expense> _expenses = [];
+  Map<int, ExpenseCategory> _categoryMap = {};
+  bool _isLoading = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadExpenses();
+  }
+
+  Future<void> _loadExpenses() async {
+    final repository = ref.read(taskRepositoryProvider);
+    final expenses = await repository.getExpensesByTask(widget.task.id);
+    final categories = await repository.getAllExpenseCategories();
+
+    setState(() {
+      _expenses = expenses;
+      _categoryMap = {for (var c in categories) c.id: c};
+      _isLoading = false;
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
+    final hasExpenses = _expenses.isNotEmpty;
+    final totalExpense = _expenses.fold<double>(0, (sum, e) => sum + e.amount);
+
+    return Container(
+      decoration: BoxDecoration(
+        color: colorScheme.surfaceContainerHighest.withAlpha(40),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: const Color(0xFF8B5CF6).withAlpha(40)),
+      ),
+      child: Column(
+        children: [
+          // Header - always visible
+          GestureDetector(
+            onTap: () => setState(() => _isExpanded = !_isExpanded),
+            child: Container(
+              padding: const EdgeInsets.all(12),
+              child: Row(
+                children: [
+                  Container(
+                    padding: const EdgeInsets.all(8),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFF8B5CF6).withAlpha(20),
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: const Icon(
+                      Icons.account_balance_wallet_outlined,
+                      size: 18,
+                      color: Color(0xFF8B5CF6),
+                    ),
+                  ),
+                  const Gap(10),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          'Expenses',
+                          style: theme.textTheme.titleSmall?.copyWith(
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                        if (hasExpenses)
+                          Text(
+                            '₹${totalExpense.toStringAsFixed(0)} • ${_expenses.length} item${_expenses.length > 1 ? 's' : ''}',
+                            style: theme.textTheme.bodySmall?.copyWith(
+                              color: const Color(0xFF8B5CF6),
+                              fontWeight: FontWeight.w500,
+                            ),
+                          )
+                        else
+                          Text(
+                            'Tap to track expenses',
+                            style: theme.textTheme.bodySmall?.copyWith(
+                              color: colorScheme.outline,
+                            ),
+                          ),
+                      ],
+                    ),
+                  ),
+                  Icon(
+                    _isExpanded
+                        ? Icons.keyboard_arrow_up
+                        : Icons.keyboard_arrow_down,
+                    color: colorScheme.outline,
+                  ),
+                ],
+              ),
+            ),
+          ),
+
+          // Expanded content
+          if (_isExpanded)
+            Container(
+              padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
+              child: Column(
+                children: [
+                  if (_isLoading)
+                    const Center(
+                      child: Padding(
+                        padding: EdgeInsets.all(16),
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      ),
+                    )
+                  else ...[
+                    // Expense list
+                    if (_expenses.isNotEmpty)
+                      Column(
+                        children: _expenses.map((expense) {
+                          final category = expense.categoryId != null
+                              ? _categoryMap[expense.categoryId]
+                              : null;
+                          return _ExpenseItem(
+                            expense: expense,
+                            category: category,
+                            onDelete: () async {
+                              final repository = ref.read(
+                                taskRepositoryProvider,
+                              );
+                              await repository.deleteExpense(expense.id);
+                              await _loadExpenses();
+                            },
+                          );
+                        }).toList(),
+                      ),
+
+                    // Add expense button
+                    GestureDetector(
+                      onTap: () async {
+                        final result = await showModalBottomSheet<bool>(
+                          context: context,
+                          isScrollControlled: true,
+                          backgroundColor: Colors.transparent,
+                          builder: (context) => AddExpenseSheet(
+                            taskId: widget.task.id,
+                            taskTitle: widget.task.title,
+                            expenseDate: widget.selectedDate,
+                          ),
+                        );
+                        if (result == true) {
+                          await _loadExpenses();
+                        }
+                      },
+                      child: Container(
+                        margin: const EdgeInsets.only(top: 8),
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 14,
+                          vertical: 12,
+                        ),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFF8B5CF6).withAlpha(10),
+                          borderRadius: BorderRadius.circular(10),
+                          border: Border.all(
+                            color: const Color(0xFF8B5CF6).withAlpha(30),
+                          ),
+                        ),
+                        child: Row(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            const Icon(
+                              Icons.add_circle_outline,
+                              size: 18,
+                              color: Color(0xFF8B5CF6),
+                            ),
+                            const Gap(8),
+                            Text(
+                              'Add Expense',
+                              style: TextStyle(
+                                color: const Color(0xFF8B5CF6),
+                                fontWeight: FontWeight.w600,
+                                fontSize: 13,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ],
+                ],
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+}
+
+// Individual expense item
+class _ExpenseItem extends StatelessWidget {
+  final Expense expense;
+  final ExpenseCategory? category;
+  final VoidCallback onDelete;
+
+  const _ExpenseItem({
+    required this.expense,
+    required this.category,
+    required this.onDelete,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
+    final categoryColor = category != null
+        ? Color(category!.colorValue)
+        : colorScheme.outline;
+
+    return Container(
+      margin: const EdgeInsets.only(bottom: 8),
+      padding: const EdgeInsets.all(10),
+      decoration: BoxDecoration(
+        color: colorScheme.surface,
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: colorScheme.outlineVariant.withAlpha(50)),
+      ),
+      child: Row(
+        children: [
+          // Category indicator
+          Container(
+            width: 32,
+            height: 32,
+            decoration: BoxDecoration(
+              color: categoryColor.withAlpha(20),
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: Icon(
+              _getIconForType(category?.type),
+              size: 16,
+              color: categoryColor,
+            ),
+          ),
+          const Gap(10),
+          // Details
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  category?.name ?? 'Uncategorized',
+                  style: theme.textTheme.bodyMedium?.copyWith(
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+                if (expense.note?.isNotEmpty == true)
+                  Text(
+                    expense.note!,
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      color: colorScheme.outline,
+                    ),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+              ],
+            ),
+          ),
+          // Amount
+          Text(
+            '₹${expense.amount.toStringAsFixed(0)}',
+            style: theme.textTheme.titleSmall?.copyWith(
+              fontWeight: FontWeight.bold,
+              color: categoryColor,
+            ),
+          ),
+          const Gap(8),
+          // Delete button
+          GestureDetector(
+            onTap: onDelete,
+            child: Container(
+              padding: const EdgeInsets.all(4),
+              child: Icon(Icons.close, size: 16, color: colorScheme.outline),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  IconData _getIconForType(ExpenseType? type) {
+    switch (type) {
+      case ExpenseType.needs:
+        return Icons.eco;
+      case ExpenseType.wants:
+        return Icons.shopping_bag;
+      case ExpenseType.savings:
+        return Icons.savings;
+      default:
+        return Icons.category;
+    }
   }
 }

@@ -383,7 +383,7 @@ class _TimelineViewState extends ConsumerState<TimelineView> {
         ),
         Expanded(
           child: ReorderableListView.builder(
-            padding: const EdgeInsets.symmetric(horizontal: 16),
+            padding: const EdgeInsets.fromLTRB(16, 0, 16, 100),
             itemCount: reorderableTasks.length,
             onReorder: (oldIndex, newIndex) async {
               if (oldIndex < newIndex) newIndex--;
@@ -612,7 +612,7 @@ class _TimelineViewState extends ConsumerState<TimelineView> {
 
     return ListView.builder(
       controller: _scrollController,
-      padding: const EdgeInsets.symmetric(horizontal: 16),
+      padding: const EdgeInsets.fromLTRB(16, 0, 16, 100),
       itemCount: timelineItems.length,
       itemBuilder: (context, index) {
         final item = timelineItems[index];

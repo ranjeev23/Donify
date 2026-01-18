@@ -1,34 +1,83 @@
 PODS:
+  - file_picker (0.0.1):
+    - FlutterMacOS
+  - file_selector_macos (0.0.1):
+    - FlutterMacOS
+  - flutter_app_group_directory (0.0.1):
+    - FlutterMacOS
   - flutter_local_notifications (0.0.1):
     - FlutterMacOS
   - FlutterMacOS (1.0.0)
   - isar_flutter_libs (1.0.0):
     - FlutterMacOS
+  - open_file_mac (0.0.1):
+    - FlutterMacOS
   - path_provider_foundation (0.0.1):
+    - Flutter
+    - FlutterMacOS
+  - pdfx (1.0.0):
+    - FlutterMacOS
+  - printing (1.0.0):
+    - FlutterMacOS
+  - share_plus (0.0.1):
+    - FlutterMacOS
+  - shared_preferences_foundation (0.0.1):
     - Flutter
     - FlutterMacOS
 
 DEPENDENCIES:
+  - file_picker (from `Flutter/ephemeral/.symlinks/plugins/file_picker/macos`)
+  - file_selector_macos (from `Flutter/ephemeral/.symlinks/plugins/file_selector_macos/macos`)
+  - flutter_app_group_directory (from `Flutter/ephemeral/.symlinks/plugins/flutter_app_group_directory/macos`)
   - flutter_local_notifications (from `Flutter/ephemeral/.symlinks/plugins/flutter_local_notifications/macos`)
   - FlutterMacOS (from `Flutter/ephemeral`)
   - isar_flutter_libs (from `Flutter/ephemeral/.symlinks/plugins/isar_flutter_libs/macos`)
+  - open_file_mac (from `Flutter/ephemeral/.symlinks/plugins/open_file_mac/macos`)
   - path_provider_foundation (from `Flutter/ephemeral/.symlinks/plugins/path_provider_foundation/darwin`)
+  - pdfx (from `Flutter/ephemeral/.symlinks/plugins/pdfx/macos`)
+  - printing (from `Flutter/ephemeral/.symlinks/plugins/printing/macos`)
+  - share_plus (from `Flutter/ephemeral/.symlinks/plugins/share_plus/macos`)
+  - shared_preferences_foundation (from `Flutter/ephemeral/.symlinks/plugins/shared_preferences_foundation/darwin`)
 
 EXTERNAL SOURCES:
+  file_picker:
+    :path: Flutter/ephemeral/.symlinks/plugins/file_picker/macos
+  file_selector_macos:
+    :path: Flutter/ephemeral/.symlinks/plugins/file_selector_macos/macos
+  flutter_app_group_directory:
+    :path: Flutter/ephemeral/.symlinks/plugins/flutter_app_group_directory/macos
   flutter_local_notifications:
     :path: Flutter/ephemeral/.symlinks/plugins/flutter_local_notifications/macos
   FlutterMacOS:
     :path: Flutter/ephemeral
   isar_flutter_libs:
     :path: Flutter/ephemeral/.symlinks/plugins/isar_flutter_libs/macos
+  open_file_mac:
+    :path: Flutter/ephemeral/.symlinks/plugins/open_file_mac/macos
   path_provider_foundation:
     :path: Flutter/ephemeral/.symlinks/plugins/path_provider_foundation/darwin
+  pdfx:
+    :path: Flutter/ephemeral/.symlinks/plugins/pdfx/macos
+  printing:
+    :path: Flutter/ephemeral/.symlinks/plugins/printing/macos
+  share_plus:
+    :path: Flutter/ephemeral/.symlinks/plugins/share_plus/macos
+  shared_preferences_foundation:
+    :path: Flutter/ephemeral/.symlinks/plugins/shared_preferences_foundation/darwin
 
 SPEC CHECKSUMS:
+  file_picker: 7584aae6fa07a041af2b36a2655122d42f578c1a
+  file_selector_macos: 9e9e068e90ebee155097d00e89ae91edb2374db7
+  flutter_app_group_directory: 14eb7e7a2b0e30a6a68bb855197b4ed6f5063e55
   flutter_local_notifications: 7e5a17a1dbc00d83dc10d43c2c4c05f2ceed233c
   FlutterMacOS: d0db08ddef1a9af05a5ec4b724367152bb0500b1
   isar_flutter_libs: a65381780401f81ad6bf3f2e7cd0de5698fb98c4
+  open_file_mac: 01874b6d6a2c1485ac9b126d7105b99102dea2cf
   path_provider_foundation: bb55f6dbba17d0dccd6737fe6f7f34fbd0376880
+  pdfx: 1e79f57f7a6ce2f4a4c30f21fa54d3dc82441b51
+  printing: c4cf83c78fd684f9bc318e6aadc18972aa48f617
+  share_plus: 510bf0af1a42cd602274b4629920c9649c52f4cc
+  shared_preferences_foundation: 7036424c3d8ec98dfe75ff1667cb0cd531ec82bb
 
 PODFILE CHECKSUM: 54d867c82ac51cbd61b565781b9fada492027009
 

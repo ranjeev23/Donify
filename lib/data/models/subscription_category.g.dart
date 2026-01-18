@@ -28,8 +28,13 @@ const SubscriptionCategorySchema = CollectionSchema(
       name: r'iconName',
       type: IsarType.string,
     ),
-    r'name': PropertySchema(
+    r'isDocument': PropertySchema(
       id: 2,
+      name: r'isDocument',
+      type: IsarType.bool,
+    ),
+    r'name': PropertySchema(
+      id: 3,
       name: r'name',
       type: IsarType.string,
     )
@@ -72,7 +77,8 @@ void _subscriptionCategorySerialize(
 ) {
   writer.writeLong(offsets[0], object.colorValue);
   writer.writeString(offsets[1], object.iconName);
-  writer.writeString(offsets[2], object.name);
+  writer.writeBool(offsets[2], object.isDocument);
+  writer.writeString(offsets[3], object.name);
 }
 
 SubscriptionCategory _subscriptionCategoryDeserialize(
@@ -85,7 +91,8 @@ SubscriptionCategory _subscriptionCategoryDeserialize(
   object.colorValue = reader.readLong(offsets[0]);
   object.iconName = reader.readStringOrNull(offsets[1]);
   object.id = id;
-  object.name = reader.readString(offsets[2]);
+  object.isDocument = reader.readBool(offsets[2]);
+  object.name = reader.readString(offsets[3]);
   return object;
 }
 
@@ -101,6 +108,8 @@ P _subscriptionCategoryDeserializeProp<P>(
     case 1:
       return (reader.readStringOrNull(offset)) as P;
     case 2:
+      return (reader.readBool(offset)) as P;
+    case 3:
       return (reader.readString(offset)) as P;
     default:
       throw IsarError('Unknown property with id $propertyId');
@@ -473,6 +482,16 @@ extension SubscriptionCategoryQueryFilter on QueryBuilder<SubscriptionCategory,
   }
 
   QueryBuilder<SubscriptionCategory, SubscriptionCategory,
+      QAfterFilterCondition> isDocumentEqualTo(bool value) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(FilterCondition.equalTo(
+        property: r'isDocument',
+        value: value,
+      ));
+    });
+  }
+
+  QueryBuilder<SubscriptionCategory, SubscriptionCategory,
       QAfterFilterCondition> nameEqualTo(
     String value, {
     bool caseSensitive = true,
@@ -648,6 +667,20 @@ extension SubscriptionCategoryQuerySortBy
   }
 
   QueryBuilder<SubscriptionCategory, SubscriptionCategory, QAfterSortBy>
+      sortByIsDocument() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addSortBy(r'isDocument', Sort.asc);
+    });
+  }
+
+  QueryBuilder<SubscriptionCategory, SubscriptionCategory, QAfterSortBy>
+      sortByIsDocumentDesc() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addSortBy(r'isDocument', Sort.desc);
+    });
+  }
+
+  QueryBuilder<SubscriptionCategory, SubscriptionCategory, QAfterSortBy>
       sortByName() {
     return QueryBuilder.apply(this, (query) {
       return query.addSortBy(r'name', Sort.asc);
@@ -707,6 +740,20 @@ extension SubscriptionCategoryQuerySortThenBy
   }
 
   QueryBuilder<SubscriptionCategory, SubscriptionCategory, QAfterSortBy>
+      thenByIsDocument() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addSortBy(r'isDocument', Sort.asc);
+    });
+  }
+
+  QueryBuilder<SubscriptionCategory, SubscriptionCategory, QAfterSortBy>
+      thenByIsDocumentDesc() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addSortBy(r'isDocument', Sort.desc);
+    });
+  }
+
+  QueryBuilder<SubscriptionCategory, SubscriptionCategory, QAfterSortBy>
       thenByName() {
     return QueryBuilder.apply(this, (query) {
       return query.addSortBy(r'name', Sort.asc);
@@ -738,6 +785,13 @@ extension SubscriptionCategoryQueryWhereDistinct
   }
 
   QueryBuilder<SubscriptionCategory, SubscriptionCategory, QDistinct>
+      distinctByIsDocument() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addDistinctBy(r'isDocument');
+    });
+  }
+
+  QueryBuilder<SubscriptionCategory, SubscriptionCategory, QDistinct>
       distinctByName({bool caseSensitive = true}) {
     return QueryBuilder.apply(this, (query) {
       return query.addDistinctBy(r'name', caseSensitive: caseSensitive);
@@ -764,6 +818,13 @@ extension SubscriptionCategoryQueryProperty on QueryBuilder<
       iconNameProperty() {
     return QueryBuilder.apply(this, (query) {
       return query.addPropertyName(r'iconName');
+    });
+  }
+
+  QueryBuilder<SubscriptionCategory, bool, QQueryOperations>
+      isDocumentProperty() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addPropertyName(r'isDocument');
     });
   }
 

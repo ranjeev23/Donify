@@ -382,11 +382,13 @@ class _SubscriptionsScreenState extends ConsumerState<SubscriptionsScreen> {
                       Icon(Icons.event, size: 12, color: colorScheme.outline),
                       const Gap(4),
                       Text(
-                        isExpired
-                            ? 'Expired ${DateFormat.MMMd().format(subscription.expiryDate)}'
+                        subscription.expiryDate == null
+                            ? 'Document'
+                            : isExpired
+                            ? 'Expired ${DateFormat.MMMd().format(subscription.expiryDate!)}'
                             : isExpiringToday
                             ? 'Expires today!'
-                            : 'Expires ${DateFormat.MMMd().format(subscription.expiryDate)}',
+                            : 'Expires ${DateFormat.MMMd().format(subscription.expiryDate!)}',
                         style: theme.textTheme.bodySmall?.copyWith(
                           color: isExpiringToday
                               ? Colors.red
@@ -563,6 +565,7 @@ class _SubscriptionsScreenState extends ConsumerState<SubscriptionsScreen> {
 
   void _navigateToReminderDate(Subscription subscription) {
     final reminderDate = subscription.reminderDate;
+    if (reminderDate == null) return;
     ref.read(selectedDateProvider.notifier).state = DateTime(
       reminderDate.year,
       reminderDate.month,
@@ -587,8 +590,11 @@ class _AddItemSheet extends ConsumerStatefulWidget {
 class _AddItemSheetState extends ConsumerState<_AddItemSheet> {
   final _nameController = TextEditingController();
   final _descriptionController = TextEditingController();
+  final _customIntervalController = TextEditingController(text: '30');
   DateTime _expiryDate = DateTime.now().add(const Duration(days: 30));
   bool _showDescription = false;
+  RecurrenceType _recurrenceType = RecurrenceType.once;
+  int _customIntervalDays = 30;
 
   bool get isEditing => widget.subscription != null;
   int get categoryId => widget.category?.id ?? widget.subscription!.categoryId;
@@ -599,8 +605,13 @@ class _AddItemSheetState extends ConsumerState<_AddItemSheet> {
     if (isEditing) {
       _nameController.text = widget.subscription!.name;
       _descriptionController.text = widget.subscription!.description ?? '';
-      _expiryDate = widget.subscription!.expiryDate;
+      if (widget.subscription!.expiryDate != null) {
+        _expiryDate = widget.subscription!.expiryDate!;
+      }
       _showDescription = widget.subscription!.description?.isNotEmpty ?? false;
+      _recurrenceType = widget.subscription!.recurrenceType;
+      _customIntervalDays = widget.subscription!.customIntervalDays;
+      _customIntervalController.text = _customIntervalDays.toString();
     }
   }
 
@@ -608,6 +619,7 @@ class _AddItemSheetState extends ConsumerState<_AddItemSheet> {
   void dispose() {
     _nameController.dispose();
     _descriptionController.dispose();
+    _customIntervalController.dispose();
     super.dispose();
   }
 
@@ -752,6 +764,67 @@ class _AddItemSheetState extends ConsumerState<_AddItemSheet> {
                 ),
               ),
             ),
+            const Gap(20),
+
+            // Recurrence Type
+            Text(
+              'How often?',
+              style: theme.textTheme.labelLarge?.copyWith(
+                color: colorScheme.onSurfaceVariant,
+              ),
+            ),
+            const Gap(8),
+            _buildRecurrenceSelector(theme, colorScheme),
+
+            // Custom interval input (only show when custom is selected)
+            if (_recurrenceType == RecurrenceType.custom) ...[
+              const Gap(12),
+              Row(
+                children: [
+                  Text(
+                    'Repeat every',
+                    style: theme.textTheme.bodyMedium?.copyWith(
+                      color: colorScheme.onSurfaceVariant,
+                    ),
+                  ),
+                  const Gap(8),
+                  SizedBox(
+                    width: 70,
+                    child: TextField(
+                      controller: _customIntervalController,
+                      keyboardType: TextInputType.number,
+                      textAlign: TextAlign.center,
+                      decoration: InputDecoration(
+                        filled: true,
+                        fillColor: colorScheme.surfaceContainerHighest
+                            .withAlpha(80),
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(10),
+                          borderSide: BorderSide.none,
+                        ),
+                        contentPadding: const EdgeInsets.symmetric(
+                          horizontal: 8,
+                          vertical: 10,
+                        ),
+                      ),
+                      onChanged: (value) {
+                        final days = int.tryParse(value);
+                        if (days != null && days > 0) {
+                          setState(() => _customIntervalDays = days);
+                        }
+                      },
+                    ),
+                  ),
+                  const Gap(8),
+                  Text(
+                    'days',
+                    style: theme.textTheme.bodyMedium?.copyWith(
+                      color: colorScheme.onSurfaceVariant,
+                    ),
+                  ),
+                ],
+              ),
+            ],
             const Gap(16),
 
             // Description Toggle
@@ -880,6 +953,94 @@ class _AddItemSheetState extends ConsumerState<_AddItemSheet> {
     }
   }
 
+  Widget _buildRecurrenceSelector(ThemeData theme, ColorScheme colorScheme) {
+    return Wrap(
+      spacing: 8,
+      runSpacing: 8,
+      children: [
+        _buildRecurrenceChip(
+          theme,
+          colorScheme,
+          RecurrenceType.once,
+          'Once',
+          Icons.looks_one,
+          Colors.blue,
+        ),
+        _buildRecurrenceChip(
+          theme,
+          colorScheme,
+          RecurrenceType.monthly,
+          'Monthly',
+          Icons.calendar_view_month,
+          Colors.purple,
+        ),
+        _buildRecurrenceChip(
+          theme,
+          colorScheme,
+          RecurrenceType.yearly,
+          'Yearly',
+          Icons.event_repeat,
+          Colors.orange,
+        ),
+        _buildRecurrenceChip(
+          theme,
+          colorScheme,
+          RecurrenceType.custom,
+          'Custom',
+          Icons.tune,
+          Colors.teal,
+        ),
+      ],
+    );
+  }
+
+  Widget _buildRecurrenceChip(
+    ThemeData theme,
+    ColorScheme colorScheme,
+    RecurrenceType type,
+    String label,
+    IconData icon,
+    Color color,
+  ) {
+    final isSelected = _recurrenceType == type;
+
+    return GestureDetector(
+      onTap: () => setState(() => _recurrenceType = type),
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 200),
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+        decoration: BoxDecoration(
+          color: isSelected
+              ? color.withAlpha(30)
+              : colorScheme.surfaceContainerHighest.withAlpha(50),
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(
+            color: isSelected ? color : Colors.transparent,
+            width: 2,
+          ),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(
+              icon,
+              size: 18,
+              color: isSelected ? color : colorScheme.outline,
+            ),
+            const Gap(6),
+            Text(
+              label,
+              style: theme.textTheme.bodyMedium?.copyWith(
+                color: isSelected ? color : colorScheme.onSurfaceVariant,
+                fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   Future<void> _saveItem() async {
     final name = _nameController.text.trim();
     if (name.isEmpty) {
@@ -900,6 +1061,8 @@ class _AddItemSheetState extends ConsumerState<_AddItemSheet> {
         name: name,
         expiryDate: _expiryDate,
         description: description.isEmpty ? null : description,
+        recurrenceType: _recurrenceType,
+        customIntervalDays: _customIntervalDays,
       );
       await repository.updateSubscription(updated);
     } else {
@@ -907,7 +1070,9 @@ class _AddItemSheetState extends ConsumerState<_AddItemSheet> {
         ..name = name
         ..categoryId = categoryId
         ..expiryDate = _expiryDate
-        ..description = description.isEmpty ? null : description;
+        ..description = description.isEmpty ? null : description
+        ..recurrenceType = _recurrenceType
+        ..customIntervalDays = _customIntervalDays;
       await repository.addSubscription(subscription);
     }
 

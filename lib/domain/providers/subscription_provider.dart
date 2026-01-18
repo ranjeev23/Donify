@@ -60,6 +60,7 @@ Stream<Map<SubscriptionCategory, List<Subscription>>> subscriptionsByCategory(
 }
 
 // Get subscriptions expiring within N days (default 7)
+// Only returns subscriptions WITH expiry dates
 @riverpod
 Stream<List<Subscription>> upcomingExpiries(
   UpcomingExpiriesRef ref, {
@@ -73,10 +74,13 @@ Stream<List<Subscription>> upcomingExpiries(
 
     final upcoming = subscriptions.where((s) {
       if (!s.isActive) return false;
+      // Skip document-only items (no expiry date)
+      if (s.expiryDate == null) return false;
+
       final expiry = DateTime(
-        s.expiryDate.year,
-        s.expiryDate.month,
-        s.expiryDate.day,
+        s.expiryDate!.year,
+        s.expiryDate!.month,
+        s.expiryDate!.day,
       );
       final today = DateTime(now.year, now.month, now.day);
       return expiry.isAfter(today.subtract(const Duration(days: 1))) &&
@@ -84,7 +88,12 @@ Stream<List<Subscription>> upcomingExpiries(
     }).toList();
 
     // Sort by expiry date (soonest first)
-    upcoming.sort((a, b) => a.expiryDate.compareTo(b.expiryDate));
+    upcoming.sort((a, b) {
+      if (a.expiryDate == null && b.expiryDate == null) return 0;
+      if (a.expiryDate == null) return 1;
+      if (b.expiryDate == null) return -1;
+      return a.expiryDate!.compareTo(b.expiryDate!);
+    });
 
     yield upcoming;
   }
@@ -100,9 +109,12 @@ Stream<List<Subscription>> expiringToday(ExpiringTodayRef ref) async* {
 
     final expiringToday = subscriptions.where((s) {
       if (!s.isActive) return false;
-      return s.expiryDate.year == now.year &&
-          s.expiryDate.month == now.month &&
-          s.expiryDate.day == now.day;
+      // Skip document-only items
+      if (s.expiryDate == null) return false;
+
+      return s.expiryDate!.year == now.year &&
+          s.expiryDate!.month == now.month &&
+          s.expiryDate!.day == now.day;
     }).toList();
 
     yield expiringToday;
