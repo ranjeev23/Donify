@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:gap/gap.dart';
 import 'package:intl/intl.dart';
+import 'package:remindlyf/data/models/expense.dart';
 import 'package:remindlyf/data/models/expense_category.dart';
 import 'package:remindlyf/data/models/income.dart';
 import 'package:remindlyf/domain/providers/money_provider.dart';
@@ -2317,7 +2318,414 @@ class _CategoryCard extends ConsumerWidget {
   }
 
   void _showCategoryExpenses(BuildContext context, WidgetRef ref) {
-    // TODO: Navigate to category detail with expenses list
+    final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
+    final categoryColor = Color(category.colorValue);
+
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (context) => DraggableScrollableSheet(
+        initialChildSize: 0.85,
+        minChildSize: 0.5,
+        maxChildSize: 0.95,
+        builder: (context, scrollController) => Container(
+          decoration: BoxDecoration(
+            color: colorScheme.surface,
+            borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
+          ),
+          child: Column(
+            children: [
+              // Handle
+              Padding(
+                padding: const EdgeInsets.only(top: 12, bottom: 8),
+                child: Container(
+                  width: 48,
+                  height: 5,
+                  decoration: BoxDecoration(
+                    color: colorScheme.outlineVariant,
+                    borderRadius: BorderRadius.circular(3),
+                  ),
+                ),
+              ),
+              // Header
+              Padding(
+                padding: const EdgeInsets.fromLTRB(20, 8, 20, 16),
+                child: Row(
+                  children: [
+                    Container(
+                      padding: const EdgeInsets.all(14),
+                      decoration: BoxDecoration(
+                        gradient: LinearGradient(
+                          colors: [
+                            categoryColor.withAlpha(40),
+                            categoryColor.withAlpha(20),
+                          ],
+                        ),
+                        borderRadius: BorderRadius.circular(14),
+                        border: Border.all(color: categoryColor.withAlpha(50)),
+                      ),
+                      child: Icon(
+                        _getIconForCategory(category.name),
+                        color: categoryColor,
+                        size: 26,
+                      ),
+                    ),
+                    const Gap(14),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            category.name,
+                            style: theme.textTheme.titleLarge?.copyWith(
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                          Row(
+                            children: [
+                              Container(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 8,
+                                  vertical: 3,
+                                ),
+                                decoration: BoxDecoration(
+                                  color: categoryColor.withAlpha(20),
+                                  borderRadius: BorderRadius.circular(6),
+                                ),
+                                child: Text(
+                                  '₹${total.toStringAsFixed(0)} spent',
+                                  style: TextStyle(
+                                    fontSize: 12,
+                                    color: categoryColor,
+                                    fontWeight: FontWeight.w600,
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ],
+                      ),
+                    ),
+                    IconButton(
+                      onPressed: () => Navigator.pop(context),
+                      icon: Container(
+                        padding: const EdgeInsets.all(8),
+                        decoration: BoxDecoration(
+                          color: colorScheme.surfaceContainerHighest,
+                          shape: BoxShape.circle,
+                        ),
+                        child: const Icon(Icons.close, size: 18),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const Divider(height: 1),
+              // Expense list
+              Expanded(
+                child: Consumer(
+                  builder: (context, ref, _) {
+                    final expensesAsync = ref.watch(expensesProvider);
+                    return expensesAsync.when(
+                      data: (allExpenses) {
+                        final categoryExpenses = allExpenses
+                            .where((e) => e.categoryId == category.id)
+                            .toList();
+
+                        // Sort by date (newest first)
+                        categoryExpenses.sort(
+                          (a, b) => b.expenseDate.compareTo(a.expenseDate),
+                        );
+
+                        if (categoryExpenses.isEmpty) {
+                          return Center(
+                            child: Column(
+                              mainAxisAlignment: MainAxisAlignment.center,
+                              children: [
+                                Container(
+                                  padding: const EdgeInsets.all(28),
+                                  decoration: BoxDecoration(
+                                    color: categoryColor.withAlpha(20),
+                                    shape: BoxShape.circle,
+                                  ),
+                                  child: Icon(
+                                    Icons.receipt_long_outlined,
+                                    size: 56,
+                                    color: categoryColor.withAlpha(150),
+                                  ),
+                                ),
+                                const Gap(20),
+                                Text(
+                                  'No Expenses Yet',
+                                  style: theme.textTheme.titleMedium?.copyWith(
+                                    fontWeight: FontWeight.bold,
+                                  ),
+                                ),
+                                const Gap(8),
+                                Text(
+                                  'Add expenses to this category\nto see them here',
+                                  style: theme.textTheme.bodyMedium?.copyWith(
+                                    color: colorScheme.outline,
+                                  ),
+                                  textAlign: TextAlign.center,
+                                ),
+                              ],
+                            ),
+                          );
+                        }
+
+                        // Group expenses by date
+                        final Map<String, List<Expense>> groupedExpenses = {};
+                        for (final expense in categoryExpenses) {
+                          final dateKey = DateFormat(
+                            'MMM d, yyyy',
+                          ).format(expense.expenseDate);
+                          if (!groupedExpenses.containsKey(dateKey)) {
+                            groupedExpenses[dateKey] = [];
+                          }
+                          groupedExpenses[dateKey]!.add(expense);
+                        }
+
+                        final dateKeys = groupedExpenses.keys.toList();
+
+                        return ListView.builder(
+                          controller: scrollController,
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 16,
+                            vertical: 12,
+                          ),
+                          itemCount: dateKeys.length,
+                          itemBuilder: (context, dateIndex) {
+                            final dateKey = dateKeys[dateIndex];
+                            final expenses = groupedExpenses[dateKey]!;
+                            final dayTotal = expenses.fold<double>(
+                              0,
+                              (sum, e) => sum + e.amount,
+                            );
+
+                            return Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                // Date header
+                                Padding(
+                                  padding: const EdgeInsets.symmetric(
+                                    vertical: 12,
+                                  ),
+                                  child: Row(
+                                    children: [
+                                      Container(
+                                        padding: const EdgeInsets.symmetric(
+                                          horizontal: 12,
+                                          vertical: 6,
+                                        ),
+                                        decoration: BoxDecoration(
+                                          color: colorScheme
+                                              .surfaceContainerHighest
+                                              .withAlpha(100),
+                                          borderRadius: BorderRadius.circular(
+                                            8,
+                                          ),
+                                        ),
+                                        child: Text(
+                                          dateKey,
+                                          style: theme.textTheme.labelMedium
+                                              ?.copyWith(
+                                                fontWeight: FontWeight.w600,
+                                                color: colorScheme
+                                                    .onSurfaceVariant,
+                                              ),
+                                        ),
+                                      ),
+                                      const Spacer(),
+                                      Text(
+                                        '₹${dayTotal.toStringAsFixed(0)}',
+                                        style: theme.textTheme.labelMedium
+                                            ?.copyWith(
+                                              fontWeight: FontWeight.bold,
+                                              color: categoryColor,
+                                            ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                                // Expenses for this date
+                                ...expenses.map(
+                                  (expense) => _buildExpenseItem(
+                                    context,
+                                    expense,
+                                    categoryColor,
+                                    ref,
+                                  ),
+                                ),
+                              ],
+                            );
+                          },
+                        );
+                      },
+                      loading: () =>
+                          const Center(child: CircularProgressIndicator()),
+                      error: (e, s) => Center(child: Text('Error: $e')),
+                    );
+                  },
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildExpenseItem(
+    BuildContext context,
+    Expense expense,
+    Color categoryColor,
+    WidgetRef ref,
+  ) {
+    final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
+
+    // Payment method icon and color
+    IconData paymentIcon;
+    Color paymentColor;
+    String paymentLabel;
+
+    if (expense.paymentMethod == PaymentMethod.cash) {
+      paymentIcon = Icons.money_rounded;
+      paymentColor = Colors.green;
+      paymentLabel = 'Cash';
+    } else {
+      paymentIcon = Icons.phone_android_rounded;
+      paymentColor = Colors.purple;
+      paymentLabel = 'UPI';
+    }
+
+    return Dismissible(
+      key: Key('expense_${expense.id}'),
+      direction: DismissDirection.endToStart,
+      confirmDismiss: (direction) async {
+        final result = await showDialog<bool>(
+          context: context,
+          builder: (ctx) => AlertDialog(
+            title: const Text('Delete Expense?'),
+            content: Text(
+              'Delete ₹${expense.amount.toStringAsFixed(0)} expense?',
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(ctx, false),
+                child: const Text('Cancel'),
+              ),
+              FilledButton(
+                onPressed: () => Navigator.pop(ctx, true),
+                style: FilledButton.styleFrom(backgroundColor: Colors.red),
+                child: const Text('Delete'),
+              ),
+            ],
+          ),
+        );
+        if (result == true) {
+          final repository = ref.read(taskRepositoryProvider);
+          await repository.deleteExpense(expense.id);
+          ref.invalidate(monthlyStatsProvider);
+          return true;
+        }
+        return false;
+      },
+      background: Container(
+        margin: const EdgeInsets.only(bottom: 10),
+        decoration: BoxDecoration(
+          gradient: LinearGradient(
+            colors: [Colors.red.shade400, Colors.red.shade600],
+          ),
+          borderRadius: BorderRadius.circular(12),
+        ),
+        alignment: Alignment.centerRight,
+        padding: const EdgeInsets.only(right: 20),
+        child: const Icon(Icons.delete_outline, color: Colors.white),
+      ),
+      child: Container(
+        margin: const EdgeInsets.only(bottom: 10),
+        padding: const EdgeInsets.all(14),
+        decoration: BoxDecoration(
+          color: colorScheme.surfaceContainerHighest.withAlpha(50),
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: categoryColor.withAlpha(30)),
+        ),
+        child: Row(
+          children: [
+            // Amount
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  colors: [
+                    categoryColor.withAlpha(30),
+                    categoryColor.withAlpha(15),
+                  ],
+                ),
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: Text(
+                '₹${expense.amount.toStringAsFixed(0)}',
+                style: theme.textTheme.titleMedium?.copyWith(
+                  fontWeight: FontWeight.bold,
+                  color: categoryColor,
+                ),
+              ),
+            ),
+            const Gap(12),
+            // Details
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  if (expense.note != null && expense.note!.isNotEmpty)
+                    Text(
+                      expense.note!,
+                      style: theme.textTheme.bodyMedium?.copyWith(
+                        fontWeight: FontWeight.w500,
+                      ),
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  Row(
+                    children: [
+                      Icon(paymentIcon, size: 14, color: paymentColor),
+                      const Gap(4),
+                      Text(
+                        paymentLabel,
+                        style: TextStyle(
+                          fontSize: 11,
+                          color: paymentColor,
+                          fontWeight: FontWeight.w500,
+                        ),
+                      ),
+                      const Gap(8),
+                      Icon(
+                        Icons.access_time,
+                        size: 12,
+                        color: colorScheme.outline,
+                      ),
+                      const Gap(4),
+                      Text(
+                        DateFormat.jm().format(expense.expenseDate),
+                        style: TextStyle(
+                          fontSize: 11,
+                          color: colorScheme.outline,
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
   }
 
   void _showCategoryOptions(BuildContext context, WidgetRef ref) {

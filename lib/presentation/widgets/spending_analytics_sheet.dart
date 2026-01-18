@@ -4,6 +4,7 @@ import 'package:fl_chart/fl_chart.dart';
 import 'package:gap/gap.dart';
 import 'package:intl/intl.dart';
 import 'package:remindlyf/data/models/expense.dart';
+import 'package:remindlyf/data/models/expense_category.dart';
 import 'package:remindlyf/domain/providers/money_provider.dart';
 
 enum ChartPeriod { daily, weekly, monthly }
@@ -131,8 +132,12 @@ class _SpendingAnalyticsSheetState
         _buildPeriodSelector(colorScheme),
         const Gap(20),
 
-        // Spending Chart - Scrollable
-        _buildSpendingChart(context, chartData),
+        // Spending Chart - Scrollable and Tappable
+        _buildSpendingChart(context, chartData, allExpenses),
+        const Gap(24),
+
+        // Top 5 Categories Pie Chart
+        _buildTopCategoriesPieChart(context, allExpenses, stats),
         const Gap(24),
 
         // Category Progress Bars
@@ -222,7 +227,11 @@ class _SpendingAnalyticsSheetState
     );
   }
 
-  Widget _buildSpendingChart(BuildContext context, List<ChartDataPoint> data) {
+  Widget _buildSpendingChart(
+    BuildContext context,
+    List<ChartDataPoint> data,
+    List<Expense> allExpenses,
+  ) {
     final colorScheme = Theme.of(context).colorScheme;
     final maxY = _getMaxY(data);
 
@@ -289,7 +298,7 @@ class _SpendingAnalyticsSheetState
                       ),
                       const Gap(4),
                       Text(
-                        'Swipe chart to see more',
+                        'Swipe chart to see more • Tap bar for details',
                         style: TextStyle(
                           fontSize: 11,
                           color: colorScheme.primary,
@@ -350,9 +359,27 @@ class _SpendingAnalyticsSheetState
                             maxY: maxY * 1.2,
                             barTouchData: BarTouchData(
                               enabled: true,
+                              handleBuiltInTouches: true,
                               touchCallback: (event, response) {
+                                // Handle tap event
+                                if (event is FlTapUpEvent &&
+                                    response?.spot != null) {
+                                  final index =
+                                      response!.spot!.touchedBarGroupIndex;
+                                  if (index >= 0 && index < data.length) {
+                                    _showPeriodExpenses(
+                                      context,
+                                      data[index],
+                                      allExpenses,
+                                    );
+                                  }
+                                }
+
+                                // Handle highlighting
                                 setState(() {
-                                  if (response?.spot != null) {
+                                  if (response?.spot != null &&
+                                      event is! FlTapUpEvent &&
+                                      event is! FlLongPressEnd) {
                                     _touchedIndex =
                                         response!.spot!.touchedBarGroupIndex;
                                   } else {
@@ -440,6 +467,17 @@ class _SpendingAnalyticsSheetState
                                           color: Color(0xFF818CF8),
                                           fontWeight: FontWeight.w600,
                                           fontSize: 13,
+                                        ),
+                                      ),
+                                      // Tap hint
+                                      const TextSpan(text: '\n'),
+                                      const TextSpan(
+                                        text: '👆 Tap for details',
+                                        style: TextStyle(
+                                          color: Color(0xFF64748B),
+                                          fontSize: 10,
+                                          fontWeight: FontWeight.w500,
+                                          height: 2,
                                         ),
                                       ),
                                     ],
@@ -622,6 +660,7 @@ class _SpendingAnalyticsSheetState
             cash: cash,
             upi: upi,
             isToday: isToday,
+            date: date,
           );
         });
 
@@ -657,6 +696,8 @@ class _SpendingAnalyticsSheetState
             cash: cash,
             upi: upi,
             isToday: weekIndex == 7,
+            date: weekStart,
+            endDate: weekEnd,
           );
         });
 
@@ -691,6 +732,8 @@ class _SpendingAnalyticsSheetState
             cash: cash,
             upi: upi,
             isToday: month.month == now.month && month.year == now.year,
+            date: month,
+            endDate: monthEnd,
           );
         });
     }
@@ -709,6 +752,541 @@ class _SpendingAnalyticsSheetState
       return '₹${(value / 1000).toStringAsFixed(1)}k';
     }
     return '₹${value.toStringAsFixed(0)}';
+  }
+
+  /// Show expense details for a selected bar/period
+  void _showPeriodExpenses(
+    BuildContext context,
+    ChartDataPoint point,
+    List<Expense> allExpenses,
+  ) {
+    final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
+
+    // Filter expenses for this period
+    final List<Expense> periodExpenses;
+    if (point.endDate != null) {
+      // Weekly or monthly period
+      periodExpenses = allExpenses.where((e) {
+        return e.expenseDate.isAfter(
+              point.date.subtract(const Duration(days: 1)),
+            ) &&
+            e.expenseDate.isBefore(point.endDate!.add(const Duration(days: 1)));
+      }).toList();
+    } else {
+      // Daily period
+      periodExpenses = allExpenses.where((e) {
+        return e.expenseDate.year == point.date.year &&
+            e.expenseDate.month == point.date.month &&
+            e.expenseDate.day == point.date.day;
+      }).toList();
+    }
+
+    // Sort by date (newest first)
+    periodExpenses.sort((a, b) => b.expenseDate.compareTo(a.expenseDate));
+
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (ctx) => DraggableScrollableSheet(
+        initialChildSize: 0.7,
+        minChildSize: 0.4,
+        maxChildSize: 0.9,
+        builder: (context, scrollController) => Container(
+          decoration: BoxDecoration(
+            color: colorScheme.surface,
+            borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
+          ),
+          child: Column(
+            children: [
+              // Handle
+              Padding(
+                padding: const EdgeInsets.only(top: 12, bottom: 8),
+                child: Container(
+                  width: 48,
+                  height: 5,
+                  decoration: BoxDecoration(
+                    color: colorScheme.outlineVariant,
+                    borderRadius: BorderRadius.circular(3),
+                  ),
+                ),
+              ),
+              // Header
+              Padding(
+                padding: const EdgeInsets.fromLTRB(20, 8, 20, 16),
+                child: Row(
+                  children: [
+                    Container(
+                      padding: const EdgeInsets.all(12),
+                      decoration: BoxDecoration(
+                        gradient: LinearGradient(
+                          colors: [
+                            Colors.purple.shade400,
+                            Colors.purple.shade600,
+                          ],
+                        ),
+                        borderRadius: BorderRadius.circular(14),
+                      ),
+                      child: const Icon(
+                        Icons.receipt_long_rounded,
+                        color: Colors.white,
+                        size: 24,
+                      ),
+                    ),
+                    const Gap(14),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            point.dayLabel,
+                            style: theme.textTheme.titleMedium?.copyWith(
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                          Row(
+                            children: [
+                              Container(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 8,
+                                  vertical: 3,
+                                ),
+                                decoration: BoxDecoration(
+                                  gradient: LinearGradient(
+                                    colors: [
+                                      Colors.purple.withAlpha(30),
+                                      Colors.purple.withAlpha(15),
+                                    ],
+                                  ),
+                                  borderRadius: BorderRadius.circular(6),
+                                ),
+                                child: Text(
+                                  '₹${point.total.toStringAsFixed(0)} • ${periodExpenses.length} items',
+                                  style: TextStyle(
+                                    fontSize: 12,
+                                    color: Colors.purple.shade600,
+                                    fontWeight: FontWeight.w600,
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ],
+                      ),
+                    ),
+                    IconButton(
+                      onPressed: () => Navigator.pop(context),
+                      icon: Container(
+                        padding: const EdgeInsets.all(8),
+                        decoration: BoxDecoration(
+                          color: colorScheme.surfaceContainerHighest,
+                          shape: BoxShape.circle,
+                        ),
+                        child: const Icon(Icons.close, size: 18),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              // Payment summary
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 20),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: Container(
+                        padding: const EdgeInsets.all(12),
+                        decoration: BoxDecoration(
+                          color: Colors.green.withAlpha(15),
+                          borderRadius: BorderRadius.circular(12),
+                          border: Border.all(color: Colors.green.withAlpha(40)),
+                        ),
+                        child: Row(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            Icon(
+                              Icons.money_rounded,
+                              size: 18,
+                              color: Colors.green.shade600,
+                            ),
+                            const Gap(6),
+                            Text(
+                              '₹${point.cash.toStringAsFixed(0)}',
+                              style: TextStyle(
+                                color: Colors.green.shade600,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                    const Gap(12),
+                    Expanded(
+                      child: Container(
+                        padding: const EdgeInsets.all(12),
+                        decoration: BoxDecoration(
+                          color: Colors.purple.withAlpha(15),
+                          borderRadius: BorderRadius.circular(12),
+                          border: Border.all(
+                            color: Colors.purple.withAlpha(40),
+                          ),
+                        ),
+                        child: Row(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            Icon(
+                              Icons.phone_android_rounded,
+                              size: 18,
+                              color: Colors.purple.shade600,
+                            ),
+                            const Gap(6),
+                            Text(
+                              '₹${point.upi.toStringAsFixed(0)}',
+                              style: TextStyle(
+                                color: Colors.purple.shade600,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const Gap(16),
+              const Divider(height: 1),
+              // Expense list
+              Expanded(
+                child: periodExpenses.isEmpty
+                    ? Center(
+                        child: Column(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            Container(
+                              padding: const EdgeInsets.all(24),
+                              decoration: BoxDecoration(
+                                color: Colors.purple.withAlpha(20),
+                                shape: BoxShape.circle,
+                              ),
+                              child: Icon(
+                                Icons.receipt_long_outlined,
+                                size: 48,
+                                color: Colors.purple.withAlpha(150),
+                              ),
+                            ),
+                            const Gap(16),
+                            Text(
+                              'No expenses',
+                              style: theme.textTheme.titleMedium?.copyWith(
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                            const Gap(4),
+                            Text(
+                              'No spending recorded for this period',
+                              style: TextStyle(color: colorScheme.outline),
+                            ),
+                          ],
+                        ),
+                      )
+                    : ListView.builder(
+                        controller: scrollController,
+                        padding: const EdgeInsets.all(16),
+                        itemCount: periodExpenses.length,
+                        itemBuilder: (context, index) {
+                          final expense = periodExpenses[index];
+                          final isUpi =
+                              expense.paymentMethod == PaymentMethod.upi;
+
+                          return Container(
+                            margin: const EdgeInsets.only(bottom: 10),
+                            padding: const EdgeInsets.all(14),
+                            decoration: BoxDecoration(
+                              color: colorScheme.surfaceContainerHighest
+                                  .withAlpha(50),
+                              borderRadius: BorderRadius.circular(12),
+                            ),
+                            child: Row(
+                              children: [
+                                // Amount
+                                Container(
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 12,
+                                    vertical: 8,
+                                  ),
+                                  decoration: BoxDecoration(
+                                    gradient: LinearGradient(
+                                      colors: [
+                                        Colors.orange.withAlpha(30),
+                                        Colors.orange.withAlpha(15),
+                                      ],
+                                    ),
+                                    borderRadius: BorderRadius.circular(10),
+                                  ),
+                                  child: Text(
+                                    '₹${expense.amount.toStringAsFixed(0)}',
+                                    style: theme.textTheme.titleMedium
+                                        ?.copyWith(
+                                          fontWeight: FontWeight.bold,
+                                          color: Colors.orange.shade700,
+                                        ),
+                                  ),
+                                ),
+                                const Gap(12),
+                                // Details
+                                Expanded(
+                                  child: Column(
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
+                                    children: [
+                                      if (expense.note != null &&
+                                          expense.note!.isNotEmpty)
+                                        Text(
+                                          expense.note!,
+                                          style: theme.textTheme.bodyMedium
+                                              ?.copyWith(
+                                                fontWeight: FontWeight.w500,
+                                              ),
+                                          maxLines: 2,
+                                          overflow: TextOverflow.ellipsis,
+                                        ),
+                                      Row(
+                                        children: [
+                                          Icon(
+                                            isUpi
+                                                ? Icons.phone_android_rounded
+                                                : Icons.money_rounded,
+                                            size: 14,
+                                            color: isUpi
+                                                ? Colors.purple
+                                                : Colors.green,
+                                          ),
+                                          const Gap(4),
+                                          Text(
+                                            isUpi ? 'UPI' : 'Cash',
+                                            style: TextStyle(
+                                              fontSize: 11,
+                                              color: isUpi
+                                                  ? Colors.purple
+                                                  : Colors.green,
+                                              fontWeight: FontWeight.w500,
+                                            ),
+                                          ),
+                                          const Gap(8),
+                                          Icon(
+                                            Icons.access_time,
+                                            size: 12,
+                                            color: colorScheme.outline,
+                                          ),
+                                          const Gap(4),
+                                          Text(
+                                            DateFormat.jm().format(
+                                              expense.expenseDate,
+                                            ),
+                                            style: TextStyle(
+                                              fontSize: 11,
+                                              color: colorScheme.outline,
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              ],
+                            ),
+                          );
+                        },
+                      ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  /// Build pie chart showing top 5 spending categories
+  Widget _buildTopCategoriesPieChart(
+    BuildContext context,
+    List<Expense> allExpenses,
+    MonthlyStats stats,
+  ) {
+    final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
+    final categoriesAsync = ref.watch(expenseCategoriesProvider);
+
+    return categoriesAsync.when(
+      data: (categories) {
+        // Get current month expenses
+        final now = DateTime.now();
+        final startOfMonth = DateTime(now.year, now.month, 1);
+        final monthExpenses = allExpenses.where((e) {
+          return e.expenseDate.isAfter(
+            startOfMonth.subtract(const Duration(days: 1)),
+          );
+        }).toList();
+
+        // Calculate totals by category
+        final Map<int, double> categoryTotals = {};
+        for (final expense in monthExpenses) {
+          if (expense.categoryId != null) {
+            categoryTotals[expense.categoryId!] =
+                (categoryTotals[expense.categoryId!] ?? 0) + expense.amount;
+          }
+        }
+
+        if (categoryTotals.isEmpty) {
+          return const SizedBox.shrink();
+        }
+
+        // Sort and get top 5
+        final sortedCategories = categoryTotals.entries.toList()
+          ..sort((a, b) => b.value.compareTo(a.value));
+        final top5 = sortedCategories.take(5).toList();
+
+        // Colors for pie chart
+        final pieColors = [
+          const Color(0xFFFF6B6B), // Red
+          const Color(0xFF4ECDC4), // Teal
+          const Color(0xFFFFE66D), // Yellow
+          const Color(0xFF95E1D3), // Mint
+          const Color(0xFFA78BFA), // Purple
+        ];
+
+        final totalTop5 = top5.fold<double>(0, (sum, e) => sum + e.value);
+
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Text(
+                  'Top Spending Categories',
+                  style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
+                ),
+                const Spacer(),
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 10,
+                    vertical: 4,
+                  ),
+                  decoration: BoxDecoration(
+                    color: colorScheme.primary.withAlpha(20),
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: Text(
+                    DateFormat.MMMM().format(now),
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: colorScheme.primary,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            const Gap(16),
+            Container(
+              padding: const EdgeInsets.all(16),
+              decoration: BoxDecoration(
+                color: colorScheme.surfaceContainerHighest.withAlpha(40),
+                borderRadius: BorderRadius.circular(16),
+              ),
+              child: Row(
+                children: [
+                  // Pie Chart
+                  SizedBox(
+                    width: 120,
+                    height: 120,
+                    child: PieChart(
+                      PieChartData(
+                        sectionsSpace: 2,
+                        centerSpaceRadius: 28,
+                        sections: top5.asMap().entries.map((entry) {
+                          final index = entry.key;
+                          final amount = entry.value.value;
+                          final percentage = totalTop5 > 0
+                              ? (amount / totalTop5) * 100
+                              : 0;
+
+                          return PieChartSectionData(
+                            color: pieColors[index % pieColors.length],
+                            value: amount,
+                            title: '${percentage.toStringAsFixed(0)}%',
+                            radius: 35,
+                            titleStyle: const TextStyle(
+                              fontSize: 10,
+                              fontWeight: FontWeight.bold,
+                              color: Colors.white,
+                            ),
+                          );
+                        }).toList(),
+                      ),
+                    ),
+                  ),
+                  const Gap(20),
+                  // Legend
+                  Expanded(
+                    child: Column(
+                      children: top5.asMap().entries.map((entry) {
+                        final index = entry.key;
+                        final categoryId = entry.value.key;
+                        final amount = entry.value.value;
+                        final category = categories.firstWhere(
+                          (c) => c.id == categoryId,
+                          orElse: () => ExpenseCategory()..name = 'Other',
+                        );
+
+                        return Padding(
+                          padding: const EdgeInsets.only(bottom: 8),
+                          child: Row(
+                            children: [
+                              Container(
+                                width: 12,
+                                height: 12,
+                                decoration: BoxDecoration(
+                                  color: pieColors[index % pieColors.length],
+                                  borderRadius: BorderRadius.circular(3),
+                                ),
+                              ),
+                              const Gap(8),
+                              Expanded(
+                                child: Text(
+                                  category.name,
+                                  style: const TextStyle(
+                                    fontSize: 12,
+                                    fontWeight: FontWeight.w500,
+                                  ),
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                              ),
+                              Text(
+                                '₹${amount.toStringAsFixed(0)}',
+                                style: TextStyle(
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.bold,
+                                  color: pieColors[index % pieColors.length],
+                                ),
+                              ),
+                            ],
+                          ),
+                        );
+                      }).toList(),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        );
+      },
+      loading: () => const Center(child: CircularProgressIndicator()),
+      error: (e, s) => const SizedBox.shrink(),
+    );
   }
 
   Widget _buildCategoryProgress(
@@ -792,6 +1370,9 @@ class ChartDataPoint {
   final double cash;
   final double upi;
   final bool isToday;
+  final DateTime
+  date; // The specific date (for daily) or start date (for weekly/monthly)
+  final DateTime? endDate; // End date for weekly/monthly periods
 
   ChartDataPoint({
     required this.label,
@@ -800,5 +1381,7 @@ class ChartDataPoint {
     required this.cash,
     required this.upi,
     required this.isToday,
+    required this.date,
+    this.endDate,
   });
 }

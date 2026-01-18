@@ -317,6 +317,7 @@ class TaskRepository {
 
   /// Create or update the reminder task(s) for a subscription
   /// For recurring subscriptions, creates multiple tasks for all occurrences
+  /// Creates separate tasks for 1 year, 1 month, and 1 day before expiry
   Future<void> _createOrUpdateReminderTask(Subscription subscription) async {
     final isar = await db;
 
@@ -329,11 +330,15 @@ class TaskRepository {
     final wakeUpHour = prefs.wakeUpHour;
     final wakeUpMinute = prefs.wakeUpMinute;
 
-    // Calculate all reminder dates based on recurrence type
-    final List<DateTime> reminderDates = _calculateReminderDates(subscription);
+    // Calculate all reminder dates with labels based on recurrence type
+    final reminders = _calculateReminderDatesWithLabels(subscription);
     final List<int> createdTaskIds = [];
 
-    for (final reminderDate in reminderDates) {
+    for (final reminder in reminders) {
+      final reminderDate = reminder['date'] as DateTime;
+      final label = reminder['label'] as String;
+      final expiryDate = reminder['expiryDate'] as DateTime;
+
       // Skip past dates
       final now = DateTime.now();
       final today = DateTime(now.year, now.month, now.day);
@@ -386,14 +391,32 @@ class TaskRepository {
         }
       }
 
+      // Create contextual title based on when the reminder is scheduled
+      String taskTitle;
+      String taskDescription;
+
+      if (label == 'tomorrow') {
+        taskTitle = '🔴 $categoryName: ${subscription.name} expires tomorrow!';
+        taskDescription =
+            'URGENT: ${subscription.name} expires on ${_formatDate(expiryDate)}. Take action now!';
+      } else if (label == '1 month before') {
+        taskTitle = '🟠 $categoryName: ${subscription.name} expires in 1 month';
+        taskDescription =
+            '${subscription.name} will expire on ${_formatDate(expiryDate)}. Plan ahead!';
+      } else {
+        taskTitle = '🟡 $categoryName: ${subscription.name} expires in 1 year';
+        taskDescription =
+            '${subscription.name} will expire on ${_formatDate(expiryDate)}. Mark your calendar.';
+      }
+
       // Create the task
       final task = Task()
-        ..title = '⚠️ $categoryName: ${subscription.name} expiring tomorrow'
+        ..title = taskTitle
         ..dueDate = scheduledTime
         ..durationMinutes = 30
         ..isSubscriptionReminder = true
         ..subscriptionId = subscription.id
-        ..description = subscription.description
+        ..description = subscription.description ?? taskDescription
         ..category = 'subscription';
 
       await addTask(task);
@@ -411,26 +434,90 @@ class TaskRepository {
     });
   }
 
+  /// Helper to format dates nicely
+  String _formatDate(DateTime date) {
+    final months = [
+      'Jan',
+      'Feb',
+      'Mar',
+      'Apr',
+      'May',
+      'Jun',
+      'Jul',
+      'Aug',
+      'Sep',
+      'Oct',
+      'Nov',
+      'Dec',
+    ];
+    return '${months[date.month - 1]} ${date.day}, ${date.year}';
+  }
+
   /// Calculate all reminder dates based on recurrence type
-  List<DateTime> _calculateReminderDates(Subscription subscription) {
-    final List<DateTime> dates = [];
+  /// Now creates reminders at: 1 year, 1 month, and 1 day before expiry
+  List<Map<String, dynamic>> _calculateReminderDatesWithLabels(
+    Subscription subscription,
+  ) {
+    final List<Map<String, dynamic>> reminders = [];
     final baseExpiryDate = subscription.expiryDate;
 
     // No reminders for document-only items (no expiry date)
     if (baseExpiryDate == null) {
-      return dates;
+      return reminders;
     }
 
-    final reminderDays = subscription.reminderDays;
+    // Helper to add multi-level reminders for a single expiry date
+    void addRemindersForExpiry(DateTime expiryDate) {
+      final now = DateTime.now();
+      final today = DateTime(now.year, now.month, now.day);
+
+      // 1 year before expiry (if applicable)
+      final oneYearBefore = DateTime(
+        expiryDate.year - 1,
+        expiryDate.month,
+        expiryDate.day,
+      );
+      if (!oneYearBefore.isBefore(today)) {
+        reminders.add({
+          'date': oneYearBefore,
+          'label': '1 year before',
+          'expiryDate': expiryDate,
+        });
+      }
+
+      // 1 month before expiry
+      final oneMonthBefore = DateTime(
+        expiryDate.year,
+        expiryDate.month - 1,
+        expiryDate.day,
+      );
+      if (!oneMonthBefore.isBefore(today)) {
+        reminders.add({
+          'date': oneMonthBefore,
+          'label': '1 month before',
+          'expiryDate': expiryDate,
+        });
+      }
+
+      // 1 day before expiry
+      final oneDayBefore = expiryDate.subtract(const Duration(days: 1));
+      if (!oneDayBefore.isBefore(today)) {
+        reminders.add({
+          'date': oneDayBefore,
+          'label': 'tomorrow',
+          'expiryDate': expiryDate,
+        });
+      }
+    }
 
     switch (subscription.recurrenceType) {
       case RecurrenceType.once:
-        // Single reminder
-        dates.add(baseExpiryDate.subtract(Duration(days: reminderDays)));
+        // Single set of reminders for the expiry date
+        addRemindersForExpiry(baseExpiryDate);
         break;
 
       case RecurrenceType.monthly:
-        // Create reminders for 12 months
+        // Create reminders for the next 12 month cycles
         for (int i = 0; i < 12; i++) {
           final expiryDate = DateTime(
             baseExpiryDate.year,
@@ -439,13 +526,13 @@ class TaskRepository {
             baseExpiryDate.hour,
             baseExpiryDate.minute,
           );
-          dates.add(expiryDate.subtract(Duration(days: reminderDays)));
+          addRemindersForExpiry(expiryDate);
         }
         break;
 
       case RecurrenceType.yearly:
-        // Create reminder for next year
-        dates.add(baseExpiryDate.subtract(Duration(days: reminderDays)));
+        // Create reminders for this year and next year
+        addRemindersForExpiry(baseExpiryDate);
         final nextYearExpiry = DateTime(
           baseExpiryDate.year + 1,
           baseExpiryDate.month,
@@ -453,7 +540,7 @@ class TaskRepository {
           baseExpiryDate.hour,
           baseExpiryDate.minute,
         );
-        dates.add(nextYearExpiry.subtract(Duration(days: reminderDays)));
+        addRemindersForExpiry(nextYearExpiry);
         break;
 
       case RecurrenceType.custom:
@@ -463,13 +550,24 @@ class TaskRepository {
         final oneYearFromNow = DateTime.now().add(const Duration(days: 365));
 
         while (currentExpiry.isBefore(oneYearFromNow)) {
-          dates.add(currentExpiry.subtract(Duration(days: reminderDays)));
+          addRemindersForExpiry(currentExpiry);
           currentExpiry = currentExpiry.add(Duration(days: intervalDays));
         }
         break;
     }
 
-    return dates;
+    // Sort by date (earliest first) and remove duplicates
+    reminders.sort(
+      (a, b) => (a['date'] as DateTime).compareTo(b['date'] as DateTime),
+    );
+
+    return reminders;
+  }
+
+  /// Legacy method for backwards compatibility - calculates just dates
+  List<DateTime> _calculateReminderDates(Subscription subscription) {
+    final remindersWithLabels = _calculateReminderDatesWithLabels(subscription);
+    return remindersWithLabels.map((r) => r['date'] as DateTime).toList();
   }
 
   /// Mark subscription as completed/renewed

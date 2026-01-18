@@ -489,8 +489,14 @@ class _ReminderTabState extends ConsumerState<ReminderTab>
                   itemCount: filteredCategories.length,
                   itemBuilder: (context, index) {
                     final category = filteredCategories[index];
+                    // Filter items: must belong to this category AND not be inside a subfolder
+                    // Items with parentFolderId set will appear inside their subfolder, not here
                     final categoryItems = subscriptions
-                        .where((s) => s.categoryId == category.id)
+                        .where(
+                          (s) =>
+                              s.categoryId == category.id &&
+                              s.parentFolderId == null,
+                        )
                         .toList();
 
                     // If searching, filter items within category too
@@ -637,8 +643,14 @@ class _ReminderTabState extends ConsumerState<ReminderTab>
                   itemCount: filteredCategories.length,
                   itemBuilder: (context, index) {
                     final category = filteredCategories[index];
+                    // Filter items: must belong to this category AND not be inside a subfolder
+                    // Items with parentFolderId set will appear inside their subfolder, not here
                     final categoryItems = subscriptions
-                        .where((s) => s.categoryId == category.id)
+                        .where(
+                          (s) =>
+                              s.categoryId == category.id &&
+                              s.parentFolderId == null,
+                        )
                         .toList();
 
                     // If searching, filter items within category too
